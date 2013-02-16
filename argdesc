@@ -1,0 +1,25 @@
+a function signature:
+	input parameters:
+		type			# if "", gotta have this string
+					# else must validate as this type
+					# validate may query cluster (poolname)
+			"" - value is a literal string
+			IntType (accept dec or hex)
+			FloatType
+			StringType
+			CephSocketpath (validate presence, node type?)
+			CephAddr (v4/v6, addr:port, or [addr]:port)
+			CephPoolname
+			CephObjectname
+			CephPgid (pool.pgnum)
+			CephName (type.id)
+			CephChoices: set of valid strings
+			CephFilepath 
+			CephFrag (0xval/bits)
+			CephUuid
+		required True|False	# optional or not
+		num	'0|1|N'		# number of repeated instances of arg
+		
+			
+	output values:
+		json-whatever?

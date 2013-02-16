@@ -1,0 +1,349 @@
+#!/usr/bin/python
+
+import sys
+import os
+import stat
+import rados
+import json
+import copy
+import types
+
+class ArgumentError(Exception):
+    pass
+
+"""
+Base class for all Ceph argument types
+"""
+class CephArgtype(object):
+    def __init__(self, **kwargs):
+        """
+        set any per-instance validation parameters here 
+        from kwargs (fixed string sets, integer ranges, etc)
+        """
+        pass
+    def valid(self, s):
+        """
+        run validation against given string s (generally one word);
+        if cool, return True
+        if not, throw ArgumentError(msg-as-to-why)
+        """
+        pass
+    def __repr__(self):
+        return '{}(\'{}\')'.format(self.__class__.__name__, self.typeargs)
+
+"""
+Admin socket path; validated for openability and S_ISFIFO
+"""
+class CephSocketpath(CephArgtype):
+    def valid(self, s):
+        try:
+            open(s, "r")
+        except:
+            raise ValueError('socket path: {} can\'t be opened'.format(s))
+        mode = os.stat(s).st_mode
+        if not stat.S_ISFIFO(mode):
+            raise ValueError('socket path {} is not a FIFO'.format(s))
+        return True
+
+"""
+IP address (v4 or v6) with optional port
+"""
+class CephAddr(CephArgtype):
+    def valid(self, s):
+        # parse off port, use socket to validate addr
+        import socket
+        type = 6
+        if s.startswith('['):
+            type = 6
+        elif s.find('.') != -1:
+            type = 4
+        if type == 4:
+            port = s.find(':')
+            if (port != -1):
+                a = s[:port]
+                p = s[port+1:]
+                if int(p) > 65535:
+                    raise ValueError('{}: invalid IPv4 port'.format(p))
+            else:
+                a = s
+                p = None
+            try:
+                socket.inet_pton(socket.AF_INET, a)
+            except:
+                raise ValueError('{}: invalid IPv4 address'.format(a))
+        else:
+            # v6
+            if s.startswith('['):
+                end = s.find(']')
+                if end == -1:
+                    raise ValueError('{} missing terminating ]'.format(s))
+                if s[end+1] == ':':
+                    try:
+                        p = int(s[end+2])
+                    except:
+                        raise ValueError('{}: bad port number'.format(s))
+                a = s[1:end]
+            else:
+                a = s
+                p = None
+            try:
+                socket.inet_pton(socket.AF_INET6, a)
+            except:
+                raise ValueError('{} not valid IPv6 address'.format(s))
+        if p is not None and long(p) > 65535:
+            raise ValueError("{} not a valid port number".format(p))
+        return True
+
+"""
+Pool name; checked for presence in cluster
+"""
+class CephPoolname(CephArgtype):
+    def valid(self, s):
+        if cluster.pool.exists(s):
+            raise ValueError("pool {} does not exist".format(s))
+        return True
+
+"""
+Object name.  Maybe should be combined with Pool name as they're always
+present in pairs, and then could be checked for presence
+"""
+class CephObjectname(CephArgtype):
+    def valid(self, s):
+        return True
+
+"""
+pgid, in form N.XXX (N = pool number, XXX = hex pgnum)
+"""
+class CephPgid(CephArgtype):
+    def valid(self, s):
+        if s.find('.') == -1:
+            raise ValueError('pgid has no .')
+        poolid, pgnum = s.split('.')
+        try:
+            pgnum = int(pgnum, 16)
+        except:
+            raise ValueError('pgnum {} not hex integer'.format(pgnum))
+        return True
+
+"""
+Name, or type.id, where type is osd|mon|client|mds, and id is a base10 int
+"""
+class CephName(CephArgtype):
+    def valid(self, s):
+        if s.find('.') == -1:
+            raise ValueError('no .')
+        t, i = s.split('.')
+        if not t in ('osd', 'mon', 'client', 'mds'):
+            raise ValueError('unknown type ' + self.t)
+        if t == 'osd':
+            try:
+                i = int(i)
+            except:
+                raise ValueError('osd id ' + i + ' not integer')
+            # XXX could check for valid id if there were a path to do it
+        return True
+
+"""
+Set of string literals; init with valid choices
+"""
+
+class CephChoices(CephArgtype):
+    def __init__(self, strings=[], **kwargs):
+        self.strings=strings
+
+    def valid(self, s):
+        if not s in self.strings:
+            raise ValueError("{} not in {}".format(s, self.strings))
+        return True
+
+# argdesc(typename, [type-specific kwargs], name='name', num=numallowed, required=False, **kwargs)
+# validation rules:
+# typename: type(**kwargs) will be constructed
+# later, type.validate(w) will be called with a word in that position
+# name is used for parse errors and for constructing JSON output
+# num is a numeric literal or 'n|N', meaning "at least one, but maybe more"
+# required means the argument must be present in the list
+# anything else are arguments to pass to the type constructor
+
+class argdesc(object):
+    def __init__(self, t, name=None, num=1, required=False, **kwargs):
+        if isinstance(t, types.StringTypes):
+            self.t = CephChoices
+            self.typeargs = dict({'strings':[t]})
+            self.required = True
+        else:
+            self.t = t
+            self.typeargs = kwargs
+            self.required = required
+
+        self.name = name
+        self.n = (num == 'N' or num == 'n')
+        self.num = num
+        if self.n:
+            self.num = 1
+        self.instance = self.t(**self.typeargs)
+
+    def __repr__(self):
+        r = 'argdesc(' + str(self.t) + ', '
+        internals = ['n', 'typeargs', 'instance', 't']
+        for (k,v) in self.__dict__.iteritems():
+            if k.startswith('__') or k in internals:
+                pass
+            else:
+                r += '{}={}, '.format(k,v)
+        for (k,v) in self.typeargs.iteritems():
+                r += '{}={}, '.format(k,v)
+        return r[:-2] + ')'
+
+    def __str__(self):
+        if self.name is None:
+            return self.t.__name__ + '()'
+        else:
+            return self.name + '()'
+
+"""
+parse_json_funcsig(s)
+
+A function signature is an array of argdesc; it can be represented 
+in JSON as 
+{
+'signame': signature_name
+'sig': [ 
+   'type': type, 'name': paramname, 'num': paramnum, required: True|False
+   .
+
+   .
+   .
+]
+}
+
+Parse the string s and return a function signature (or thrown an
+exception).
+"""
+
+def parse_json_funcsig(s):
+    import json
+    try:
+        sig = json.loads(s)
+    except Exception as e:
+        print >> sys.stderr, "Couldn't parse JSON funcsig from {}: {}", s, e
+    newsig = []
+    signame = sig.setdefault('signame', 'unnamed')
+    if not 'sig' in sig:
+        raise ValueError('JSON sig {} has no "sig" object'.format(signame))
+    signum = 1
+    for d in sig['sig']:
+        if not 'type' in d:
+            raise ValueError('JSON sig {} descriptor {} has no type'.
+                             format(signame, signum))
+        try:
+            # XXX - how to come up with a type object for a named type
+            # without using eval?
+            t = eval(d['type'])
+        except:
+            t = d['type']
+        newsig.append(argdesc(t,
+                              name=d.setdefault('name', None),
+                              num=d.setdefault('num', 1),
+                              required=d.setdefault('required', False)))
+    return newsig
+
+
+def validate_one(word, desc, argpos):
+    try:
+        desc.instance.valid(word)
+        desc.numseen += 1
+        if desc.n:
+            desc.num = desc.numseen
+    except Exception as e:
+        if not desc.required:
+            pass
+        raise ArgumentError(e)
+
+"""
+validate(s,signature)
+
+Assumes s represents a possible command input following format of
+signature.  Runs a validation; no exception means it's OK
+"""
+
+def validate(s, signature):
+    mysig = copy.deepcopy(signature)
+    words = s.split()
+    argpos = 1
+    for desc in mysig:
+        setattr(desc, 'numseen', 0)
+        while desc.numseen < desc.num:
+            try:
+                word = words.pop(0)
+            except:
+                # out of input, all of rest better be not required
+                if desc.required and desc.numseen < desc.num:
+                    if (desc.n):
+                        required = 'at least'
+                    else:
+                        required = 'exactly'
+                    raise ArgumentError('saw {} of param[{}]({}): expected {} {}'.format(desc.numseen, argpos, desc, required, desc.num))
+                else:
+                    break
+            validate_one(word, desc, argpos)
+            argpos += 1
+
+# convenience function
+
+def try_validate(s, sig):
+    try:
+        validate(s, sig)
+        print'{!r} ok'.format(s)
+    except Exception as e:
+        print'{!r} failed: {}'.format(s, e)
+
+sigs = [
+    [argdesc('osd'), argdesc('crush'), argdesc('tunables'),
+     argdesc(CephChoices,
+             strings=['legacy', 'argonaut', 'bobtail', 'optimal', 'default'])],
+    [argdesc('mon'), argdesc('stat')],
+    [argdesc('mon'), argdesc('getmap')],
+    [argdesc('mon'), argdesc('dump')],
+    [argdesc('mon'), argdesc('add'),
+     argdesc(CephName, required=True), argdesc(CephAddr, required=True)],
+    [argdesc('mon'), argdesc('remove'), argdesc(CephName)]
+]
+
+def main():
+    global cluster
+    cluster = rados.Rados(conffile='')
+    """
+    sig = [argdesc('osd'), argdesc('stat')]
+    print sig
+    for c in ['osd stat', 'osd foo']:
+        try_validate(c, sig)
+    sig = [argdesc('osd'), argdesc('find'),
+           argdesc(int, name='n', required=True)]
+    for c in ['osd find s', 'osd find', 'osd find 1']:
+        try_validate(c, sig)
+    sig = [argdesc(IntType, name='ids', required=True, num='N')]
+    print sig
+    try_validate('0 1 2' , sig)
+    print sig
+    try_validate('0 1 2 s' , sig)
+
+    sig = parse_json_funcsig('{"signame":"mylittlesiggy", "sig":[{"type":"literal", "name":"arg1", "required":false}]}')
+    try_validate('literal', sig)
+    try_validate('iteral', sig)
+    sig = parse_json_funcsig('{"signame":"mybigsiggy", "sig":[{"type":"IntType", "name":"arg1", "required":false}]}')
+    try_validate('1', sig)
+    try_validate('', sig)
+    try_validate('s', sig)
+    """
+
+    try_validate("osd crush tunables foo", sigs[0])
+    try_validate("osd crush tunables legacy", sigs[0])
+    try_validate("mon stat", sigs[1])
+    try_validate("mon add mon.a 10.1.1.4", sigs[4])
+    try_validate("mon add mon.a 10.1.1.4:1000", sigs[4])
+    try_validate("mon add mon.a ffe0::0", sigs[4])
+    try_validate("mon add mon.a [ffe0::0]:6789", sigs[4])
+
+if __name__ == '__main__':
+    main()

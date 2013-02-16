@@ -1,0 +1,9 @@
+info to fully describe a command:
+
+argument list
+	- constant t/f
+	- required t/f
+	- if not constant
+		- type (user-defined ("name.id"))
+		- range of #allowed (1, 1-n, 0 or 1, etc)
+		

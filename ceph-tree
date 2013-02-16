@@ -1,0 +1,244 @@
+--status/-s 
+--watch/-w
+--watch-debug --watch-info --watch-sec --watch-warn --watch-error
+--concise
+--verbose
+-i/--in-file
+-o/--out-file
+--conf
+--id
+--name
+--version
+--admin-daemon {socketpath} 
+	:VALID FOR ALL:
+	0 
+	version
+	git_version
+	help
+	perf dump
+	perfcounters_dump
+	1
+	perf schema
+	perfcounters_schema
+	2
+	config show
+	config set {var} {value}
+	log flush
+	log dump
+	log reopen
+	:VALID FOR MON:
+	mon_status
+	quorum_status
+	add_bootstrap_peer_hint {addr}
+	:VALID FOR OSD:
+	dump_ops_in_flight
+	dump_historic_ops
+	dump_op_pq_state
+	setomapval {pool-id} {obj-name} {key} {val}
+	rmomapkey {pool-id} {obj-name} {key}
+	setomapheader {pool-id} {obj-name} {key}
+	getomap {pool-id} {obj-name}
+	:VALID FOR CLIENT (osdc):
+	objecter_requests
+	:VALID FOR MDS:
+	mds_requests
+	mds_sessions
+	dump_cache
+pg {pgid}
+	query
+	mark_unfound_lost revert 
+	list_missing
+tell {name}
+	version
+	injectargs
+	bench
+	flush_pg_stats
+	heap
+		dump
+		start_profiler
+		stop_profiler
+		release
+		stats
+	debug 
+		{outfile} dump_missing
+		kick_recovery_wq {new recovery_delay_start}
+	cpu_profiler
+	dump_pg_recovery_stats
+	reset_pg_recovery_stats
+stop_cluster
+injectargs {arg}
+status
+health
+report
+quorum_status
+mon_status
+heap
+	dump
+	start_profiler
+	stop_profiler
+	release
+	stats
+quorum exit
+quorum enter
+auth
+	export
+	get
+	print-key/print_key/get-key
+	list
+	import
+	add
+	get-or-create
+	get-or-create-key
+	caps
+	del
+log {data-to-monitor-log}
+mds
+	stat
+	dump
+	getmap
+	tell {id}
+		injectargs
+		dumpcache
+		exit
+		session kill
+		issue_caps {inum}
+		try_eval {inum} {mask}
+		fragment_dir {path} {frag} {bits}
+		merge_dir {path} {frag}
+		export_dir {path} {mdstarget}
+		cpu_profiler 
+			status
+			flush
+		heap
+			dump
+			start_profiler
+			stop_profiler
+			release
+			stats
+	compat
+		show
+		help
+	stop/deactivate {id}
+	set_max_mds {n}
+	setmap
+	set_state {gid} {state} 
+	fail {id}
+	rm {id}
+	rmfailed {id}
+	cluster_fail
+	cluster_down
+	cluster_up
+	compat
+		rm_compat {f}
+		rm_incompat {f}
+	add_data_pool {poolid}
+	remove_data_pool {poolid}
+	newfs {metadata-pool-id} {data-pool-id} --yes-i-really-mean-it
+mon
+	stat
+	getmap
+	dump
+	tell {id}
+		XXX no valid mon tell commands? or broken
+	add {name} {addr[:port]}
+	remove {name}
+osd
+	stat
+	dump
+	tree
+	ls
+	getmap
+	getcrushmap
+	getmaxosd
+	tell {id}
+	find {n}
+	map {pool} {objectname}
+	scrub {id}
+	deep-scrub {id}
+	repair {id}
+	lspools {auid XXX deprecated?}
+	blacklist
+		ls
+		add {addr} [{until}]
+		rm {addr}
+	crush
+		rule list/ls
+		rule dump
+		dump
+		set {id} [{osdname}] {weight} {loc1} [{loc2}..]
+		create-or-move {id} {weight} {loc1} [{loc2}..]
+		move {name} {loc1} [{loc2}..]
+		rm/remove {id}
+		reweight {name} {weight}
+		tunables {legacy|argonaut|bobtail|optimal|default}
+		rule create-simple {name} {root} {type} 
+		rule rm {name}
+	setcrushmap/crush set
+	setmaxosd
+	pause/set pause
+	unpause/unset pause
+	set
+		noup
+		nodown
+		noout
+		noin
+		nobackfill
+		norecover
+	unset
+		noup
+		nodown
+		noout
+		noin
+		nobackfill
+		norecover
+	cluster_snap (XXX disabled)
+	down {id} [{id}..]
+	out {id} [{id}..]
+	in {id} [{id}..]
+	reweight {id} {weight}
+	lost {id} --yes-i-really-mean-it
+	create [uuid]
+	rm {id} [{id}..]
+	pool
+		mksnap {poolname} {snapname} 
+		rmsnap {poolname} {snapname}
+		create {poolname} {pg_num} [{pgp_num}]
+		delete {poolname} {poolname} --yes-i-really-really-mean-it
+		rename {poolname} {newpoolname}
+		set
+			{poolname} size {n}
+			{poolname} min_size {n}
+			{poolname} crash_replay_interval {n}
+			{poolname} pg_num {n}
+			{poolname} pgp_num {n}
+			{poolname} crush_ruleset {n}
+		get
+			{poolname} size
+			{poolname} min_size
+			{poolname} crash_replay_interval
+			{poolname} pg_num
+			{poolname} pgp_num
+			{poolname} crush_ruleset
+	reweight-by-utilization [oload-in-percent-gt-100]
+	thrash {num-epochs}
+pg
+	stat
+	getmap
+	send_pg_creates
+	dump
+	dump_json
+	dump_stuck
+		inactive
+		unclean
+		stale
+	dump_pools_json
+	map {pgid}
+	scrub {pgid}
+	deep-scrub {pgid}
+	repair {pgid}
+	debug
+		unfound_objects_exist
+		degraded_pgs_exist
+	force_create_pg {pgid}
+	set_full_ratio {full_ratio (float)}
+	set_nearfull_ratio {nearfull_ratio (float)}

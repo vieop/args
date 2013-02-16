@@ -1,0 +1,352 @@
+Command-arg commands:
+
+--status/-s 
+	show status (CEPH_TOOL_MODE_STATUS)
+	(implemented by sending 'status' to mon)
+--watch/-w
+	watch cluster  (CEPH_TOOL_MODE_WATCH)
+--watch-debug --watch-info --watch-sec --watch-warn --watch-error
+	enable --watch with the specified error logging level (default info)
+	accomplished by subscribing to mon events (MMonSubscribe)
+
+otherwise CEPH_TOOL_MODE_CLI_INPUT (CEPH_TOOL_MODE_GUI unused)
+
+No args: start shell waiting for commands
+
+--concise
+--verbose set/unset concise global 
+
+-i/--in-file
+-o/--out-file
+
+standard:
+--conf
+--id
+--name
+--version
+
+--admin-daemon <socket> <command> 
+	command interpreted by daemon named in socket
+	write command literally, read back uint32_t len followed by
+ 	 that many chars of data, dump to stdout
+all:
+	0 (not in 'help': return admin socket version CEPH_ADMIN_SOCK_VERSION)
+	version	(get ceph version)
+	git_version (get git sha1)
+	help (list available commands)
+	perf dump (same, dump perfcounters)
+	perfcounters_dump (same, not in 'help')
+	1 (same, not in 'help')
+	perf schema (dump perf counter schema)
+	perfcounters_schema (same, not in 'help')
+	2 (same, not in 'help')
+	config show
+	config set <var> <value>
+	log flush
+	log dump
+	log reopen
+mon:
+	mon_status (show current monitor status)
+	quorum_status (show current quorum status)
+	add_bootstrap_peer_hint <addr> (add peer address as potential bootstrap peer for cluster bringup)
+
+osd:
+	dump_ops_in_flight (show the ops currently in flight)
+	dump_historic_ops (show slowest recent ops)
+	dump_op_pq_state (dump op priority queue state)
+	setomapval (setomapval <pool-id> <obj-name> <key> <val>)
+	rmomapkey (rmomapkey <pool-id> <obj-name> <key>)
+	setomapheader (setomapheader <pool-id> <obj-name> <key>)
+	getomap (getomap <pool-id> <obj-name>)
+
+osdc (clients):
+	objecter_requests (show in-progress osd requests)
+
+mds:
+	mds_requests (show in-progress mds-requests)
+	mds_sessions (show mds session state)
+	dump_cache (show in-memory metadata cache contents)
+
+cmds: tools/common.cc: eat "tell" or "pg" and set flag for send_command()
+set reply to false, send_command(ctx), wait for reply global to be set
+(by messenger's dispatch function)
+
+collect reply_bl global and send to stdout if no error, stderr if err
+return to main; print outbl to stdout if no error (or -o file)
+
+send_command:
+
+if not 'daemon' command (tell or pg <pgid>), send a MMonCommand and return
+
+Otherwise:
+
+if 'pg <pgid>' or 'tell osd <n>', start a osdmap subscription request and returnwith 'cmd_waiting_for_osdmap' set true (dispatch will handle
+a reply of type CEPH_MSD_OSD_MAP, store it, and then send_command())
+
+If 'pg <pgid>', get the acting set for <pgid>, and choose the first
+from it (the primary) as the target
+
+If target is an OSD, validate <n>, make sure it's up, and send it
+an MCommand, with a tid and a keepalive tick
+
+Otherwise, fail ('tell TGT' must name an OSD)
+
+OSD-only cmd 'ceph pg <pgid>', different from other 'ceph pg' cmds in that
+we identify the target as the primary for the pgid given, and send the
+message (MCommand) directly to that target rather than to the mons.  Also,
+the command is sent as a "best effort, don't verify completion, don't
+wait for return data" thing
+
+	* pg <pgid> query returns a detailed JSON dump for <pgid>
+	* pg <pgid> mark_unfound_lost revert 
+	* pg <pgid> list_missing lists missing objects in <pgid>
+
+'ceph tell <name>' also goes directly to the target, and this target
+must be an osd:
+	* tell <name> version returns daemon version
+	* tell <name> injectargs takes config args and stuffs them into daemon
+	* tell <name> bench takes a bsize and count and does a benchmark
+	* tell <name> flush_pg_stats...does that
+	tell <name> heap is valid if tcmalloc enabled:
+		* tell <name> heap dump
+		* tell <name> heap start_profiler
+		* tell <name> heap stop_profiler
+		* tell <name> heap release
+		* tell <name> heap stats
+	tell <name> debug 
+		* tell <name> debug <file> dump_missing
+		* tell <name> debug kick_recovery_wq <new recovery_delay_start>
+	* tell name cpu_profiler
+	* tell name dump_pg_recovery_stats
+	* tell name reset_pg_recovery_stats
+
+OSD commands come into its messenger dispatch function and go to
+OSD::handle_command(); this queues it onto command_wq, which has
+been hooked up to OSD::do_command running from the thread pool.
+Two flavors: one for MMonCommand, where session/auth has already been
+done, and MCommand, which needs to handle session checking (?), 
+caps checking, etc.
+
+
+MMonCommands, on the other hand, are sent to the monitor, and if the
+monitor sends it on (as in a 'tell'), the monitor client returns
+immediately with status 0, returned string 'ok', not waiting for
+the told daemon to respond.
+	
+=== MMonCommands
+
+Monitor commands are handled in Monitor:_ms_dispatch, which, because
+they're of type MSG_MON_COMMAND, MMonCommand, calls handle_command,
+which may call PaxosService::dispatch, which will call
+virtual preprocess_query(m).  Derived classes of PaxosService are AuthMonitor,
+LogMonitor, MDSMonitor, MonmapMonitor, OSDMonitor, or PGMonitor.
+Once preprocess_query gets a crack, if it returns false, dispatch goes
+on to call virtual prepare_update(), which can do lots more.
+
+Directly handled commands (in Monitor::handle_command()):
+	* stop_cluster
+	* injectargs <arg> (pass to g_conf->injectargs())
+	* status
+	* health
+	* report
+	* quorum_status
+	* mon_status
+	heap -> heap_profiler_handle_command if tcmalloc
+		* heap dump
+		* heap start_profiler
+		* heap stop_profiler
+		* heap release
+		* heap stats
+	* quorum exit
+	* quorum enter
+
+AuthMonitor (auth):
+preprocess:
+	* auth export
+	* auth get
+	* auth print-key/print_key/get-key
+	* auth list
+prepare_update:
+	* auth import
+	* auth add
+	* auth get-or-create
+	* auth get-or-create-key
+	* auth caps
+	* auth del
+
+
+* log
+processed directly in Monitor::handle_command(), namely, send all
+data after "ceph log" to monitor log
+preprocess:
+prepare_update:
+
+MDSMonitor:
+mds
+preprocess:
+	* mds stat
+	* mds dump
+	* mds getmap
+	mds tell
+		* mds tell <id> injectargs
+		* mds tell <id> dumpcache
+		* mds tell <id> exit
+		* mds tell <id> session kill
+		* mds tell <id> issue caps <inum>
+		* mds tell <id> try_eval <inum> <mask>
+		* mds tell <id> fragment_dir <path> <frag> <bits>
+		* mds tell <id> merge_dir <path> <frag>
+		* mds tell <id> export_dir <path> <target>
+			[ all error messages call this migrate_dir ]
+		mds tell <id> cpu_profiler 
+			* mds tell <id> cpu_profiler status
+			* mds tell <id> cpu_profiler flush
+		mds tell <id> heap
+			* mds tell <id> heap dump
+			* mds tell <id> heap start_profiler
+			* mds tell <id> heap stop_profiler
+			* mds tell <id> heap release
+			* mds tell <id> heap stats
+	mds compat
+		* mds compat show
+		* mds compat help
+prepare_update:
+	* mds stop/deactivate <id>
+	* mds set_max_mds <n>
+	* mds setmap
+	* mds set_state <gid> <state> 
+	* mds fail <id>
+	* mds rm <id>
+	* mds rmfailed <id>
+	* mds cluster_fail
+	* mds cluster_down
+	* mds cluster_up
+	* mds compat
+		* mds rm_compat <f>
+		* mds rm_incompat <f>
+	* mds add_data_pool <poolid>
+	* mds remove_data_pool <poolid>
+	* mds newfs <metadata-pool-id> <data-pool-id> --yes-i-really-mean-it
+	 
+MonmapMonitor:
+mon
+preprocess:
+	* mon stat
+	* mon getmap
+	* mon dump
+	add/remove are parsed, but return false
+	* mon add <name> <addr[:port]>
+	* mon remove <name>
+	mon tell (id or *) send on directly to mon
+		no valid mon tell commands? or broken
+prepare_update:
+	* mon add <name> <addr[:port]>
+	* mon remove <name>
+
+OSDMonitor:
+osd
+preprocess:
+	* osd stat
+	* osd dump
+	* osd tree
+	* osd ls
+	* osd getmap
+	* osd getcrushmap
+	* osd getmaxosd
+	* osd tell <id> <stuff>
+	* osd find <n>
+	* osd map <pool> <objectid>
+	* osd scrub <id>
+	* osd deep-scrub <id>
+	* osd repair <id>
+	* osd lspools <auid>
+	* osd blacklist ls
+	* osd crush rule list/ls
+	* osd crush rule dump
+	* osd crush dump
+prepare_update:
+	* osd setcrushmap/crush set
+	osd crush
+		* osd crush set <id> [<osdname>] <weight> <loc1> [<loc2>..]
+		* osd crush create-or-move <id> <weight> <loc1> [<loc2>..]
+		* osd crush move <name> <loc1> [<loc2>..]
+		* osd crush rm/remove <id>
+		* osd crush reweight <name> <weight>
+		* osd crush tunables [legacy|argonaut|bobtail|optimal|default]
+		* osd crush rule create-simple <name> <root> <type> 
+		* osd crush rule rm <name>
+	* osd setmaxosd
+	* osd pause/set pause
+	* osd unpause/unset pause
+	osd set
+		* osd set noup
+		* osd set nodown
+		* osd set noout
+		* osd set noin
+		* osd set nobackfill
+		* osd set norecover
+	osd unset
+		* osd unset noup
+		* osd unset nodown
+		* osd unset noout
+		* osd unset noin
+		* osd unset nobackfill
+		* osd unset norecover
+	* osd cluster_snap (disabled)
+	* osd down <id> [<id>..]
+	* osd out <id> [<id>..]
+	* osd in <id> [<id>..]
+	* osd reweight <id> <weight>
+	* osd lost <id> --yes-i-really-mean-it
+	* osd create [uuid]
+	* osd rm <id> [<id>..]
+	osd blacklist
+		* osd blacklist add <addr> [<until>]
+		* osd blacklist rm <addr>
+	osd pool
+		* osd pool mksnap <poolname> <snapname> 
+		* osd pool rmsnap <poolname> <snapname>
+		* osd pool create <poolname> <pg_num> [<pgp_num>]
+		* osd pool delete <poolname> <poolname> --yes-i-really-really-mean-it
+		* osd pool rename <poolname> <newpoolname>
+	osd pool set
+		* osd pool set <poolname> size <n>
+		* osd pool set <poolname> min_size <n>
+		* osd pool set <poolname> crash_replay_interval <n>
+		* osd pool set <poolname> pg_num <n>
+		* osd pool set <poolname> pgp_num <n>
+		* osd pool set <poolname> crush_ruleset <n>
+	osd pool get
+		* osd pool get <poolname> size
+		* osd pool get <poolname> min_size
+		* osd pool get <poolname> crash_replay_interval
+		* osd pool get <poolname> pg_num
+		* osd pool get <poolname> pgp_num
+		* osd pool get <poolname> crush_ruleset
+	* osd reweight-by-utilization [<oload>]
+	* osd thrash <num-epochs>
+
+PGMonitor
+pg
+preprocess:
+	* pg stat
+	* pg getmap
+	* pg send_pg_creates
+	* pg dump
+	* pg dump_json
+	pg dump_stuck
+		* pg dump_stuck inactive
+		* pg dump_stuck unclean
+		* pg dump_stuck stale
+	* pg dump_pools_json
+	* pg map <pgid>
+	* pg scrub <pgid>
+	* pg deep-scrub <pgid>
+	* pg repair <pgid>
+	pg debug
+		* pg debug unfound_objects_exist
+		* pg debug degraded_pgs_exist
+prepare_update:
+	* pg force_create_pg <pgid>
+	* pg set_full_ratio <full_ratio>
+	* pg set_nearfull_ratio <nearfull_ratio>

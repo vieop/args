@@ -1,0 +1,12 @@
+argparse requires that all "optional" options are prefixed with a
+special prefix character (usually '-'), and that other options are
+either positional, or 'subcommands' handled by subparsers
+
+If subparser(s) are supplied, the argument branching into the subparser is
+required...that is, one cannot have command --switch *and* command subcommand;
+once subcommand is added as a subparser, it must be supplied.  Optional
+subparsers have been requested as a feature, but not yet.
+
+
+
+
