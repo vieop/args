@@ -25,11 +25,58 @@ class CephArgtype(object):
         """
         run validation against given string s (generally one word);
         if cool, return True
-        if not, throw ArgumentError(msg-as-to-why)
+        if not, throw ValueError(msg-as-to-why)
         """
         pass
     def __repr__(self):
         return '{}(\'{}\')'.format(self.__class__.__name__, self.typeargs)
+
+"""
+range-limited integers, [+|-][0-9]+ or 0x[0-9a-f]+
+range: list of 1 or 2 ints, [min] or [min,max]
+bits: number of bits result must fit into
+XXX: signed not working right -129 validates against bits=8
+"""
+class CephInt(CephArgtype):
+    def __init__(self, range=[], bits=64):
+        self.range = range
+        self.bits = bits
+
+    def valid(self, s):
+        try:
+           val = long(s)
+        except:
+            raise ValueError("{} doesn't represent an int".format(s))
+        if len(self.range) == 2:
+            if val < self.range[0] or val > self.range[1]:
+                raise ValueError("{} not in range {}".format(val, self.range))
+        elif len(self.range) == 1:
+            if val < self.range[0]:
+                raise ValueError("{} not in range {}".format(val, self.range))
+        if val.bit_length() > self.bits:
+            raise ValueError("{} can't be expressed in {} bits", s, self.bits)
+        return True
+
+"""
+range-limited float type
+range: list of 1 or 2 floats, [min] or [min, max]
+"""
+class CephFloat(CephArgtype):
+    def __init__(self, range=[]):
+        self.range = range
+
+    def valid(self, s):
+        try:
+            val = float(s)
+        except:
+            raise ValueError("{} doesn't represent a float".format(s))
+        if len(self.range) == 2:
+            if val < self.range[0] or val > self.range[1]:
+                raise ValueError("{} not in range {}".format(val, self.range))
+        elif len(self.range) == 1:
+            if val < self.range[0]:
+                raise ValueError("{} not in range {}".format(val, self.range))
+        return True
 
 """
 Admin socket path; validated for openability and S_ISFIFO
@@ -99,8 +146,8 @@ Pool name; checked for presence in cluster
 """
 class CephPoolname(CephArgtype):
     def valid(self, s):
-        if cluster.pool.exists(s):
-            raise ValueError("pool {} does not exist".format(s))
+        # if cluster.pool.exists(s):
+        #    raise ValueError("pool {} does not exist".format(s))
         return True
 
 """
@@ -311,8 +358,8 @@ sigs = [
 ]
 
 def main():
-    global cluster
-    cluster = rados.Rados(conffile='')
+    #global cluster
+    #cluster = rados.Rados(conffile='')
     """
     sig = [argdesc('osd'), argdesc('stat')]
     print sig
@@ -344,6 +391,29 @@ def main():
     try_validate("mon add mon.a 10.1.1.4:1000", sigs[4])
     try_validate("mon add mon.a ffe0::0", sigs[4])
     try_validate("mon add mon.a [ffe0::0]:6789", sigs[4])
+
+    intsig = [argdesc(CephInt, range=[0,15])]
+    try_validate('-1', intsig)
+    try_validate('0', intsig)
+    try_validate('1', intsig)
+    try_validate('15', intsig)
+    try_validate('16', intsig)
+    intsig = [argdesc(CephInt, bits=8)]
+    try_validate('0', intsig)
+    try_validate('-1', intsig)
+    try_validate('-128', intsig)
+    try_validate('-129', intsig)
+    try_validate('127', intsig)
+    try_validate('128', intsig)
+    try_validate('255', intsig)
+    try_validate('256', intsig)
+
+    floatsig = [argdesc(CephFloat, range=[0.0, 1.0])]
+    try_validate('1.0', floatsig)
+    try_validate('1.000001', floatsig)
+    try_validate('0.0', floatsig)
+    try_validate('-0.0', floatsig)
+    try_validate('-0.0000001', floatsig)
 
 if __name__ == '__main__':
     main()
