@@ -3,7 +3,7 @@
 import sys
 import os
 import stat
-import rados
+#import rados
 import json
 import copy
 import types
@@ -43,8 +43,8 @@ class CephInt(CephArgtype):
         self.bits = bits
 
     def valid(self, s):
-        try:
-           val = long(s)
+        try: 
+            val = long(s)
         except:
             raise ValueError("{} doesn't represent an int".format(s))
         if len(self.range) == 2:
@@ -78,6 +78,20 @@ class CephFloat(CephArgtype):
                 raise ValueError("{} not in range {}".format(val, self.range))
         return True
 
+"""
+String.  Not much use for this; maybe we might use illegal chars
+for something?
+"""
+class CephString(CephArgtype):
+    def __init__(self, badchars=''):
+        self.badchars = badchars
+
+    def valid(self, s):
+        for c in badchars:
+            if c in s:
+                raise ValueError("bad char {} in {}".format(c, s))
+        return True
+        
 """
 Admin socket path; validated for openability and S_ISFIFO
 """
@@ -202,6 +216,50 @@ class CephChoices(CephArgtype):
         if not s in self.strings:
             raise ValueError("{} not in {}".format(s, self.strings))
         return True
+
+"""
+Openable file
+"""
+class CephFilepath(CephArgtype):
+    def valid(self, s):
+        try:
+            open(s, 'a+')
+        except Exception as e:
+            raise ValueError('can\'t open {}: {}'.format(s, e))
+
+"""
+'Fragment' ??? XXX
+"""
+class CephFragment(CephArgtype):
+   def valid(self, s):
+        if s.find('/') == -1:
+            raise ValueError('{}: no /'.format(s))      
+        val, bits = s.split('/')
+        # XXX is this right?
+        if not val.startswith('0x'):
+            raise ValueError("{} not a hex integer".format(val))
+        try:
+            long(val)
+        except:
+            raise ValueError('can\'t convert {} to integer'.format(val))
+        try:
+            long(bits)
+        except:
+            raise ValueError('can\'t convert {} to integer'.format(bits))
+        return True
+
+""" 
+CephUUID: pretty self-explanatory
+""" 
+class CephUUID(CephArgtype):
+    def valid(self, s):
+        try:
+            uuid.UUID(s)
+        except Exception as e:
+            raise ValueError('invalid UUID {}: {}'.format(s, e))
+        return True
+
+############################################################################
 
 # argdesc(typename, [type-specific kwargs], name='name', num=numallowed, required=False, **kwargs)
 # validation rules:
