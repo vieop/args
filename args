@@ -350,9 +350,9 @@ def parse_json_funcsig(s):
         except:
             t = d['type']
         newsig.append(argdesc(t,
-                              name=d.setdefault('name', None),
-                              num=d.setdefault('num', 1),
-                              required=d.setdefault('required', False)))
+                              name=d.get('name', None),
+                              num=d.get('num', 1),
+                              required=d.get('required', False)))
     return newsig
 
 
@@ -420,7 +420,6 @@ sigs = [
 def main():
     #global cluster
     #cluster = rados.Rados(conffile='')
-    """
     sig = [argdesc('osd'), argdesc('stat')]
     print sig
     for c in ['osd stat', 'osd foo']:
@@ -429,7 +428,7 @@ def main():
            argdesc(int, name='n', required=True)]
     for c in ['osd find s', 'osd find', 'osd find 1']:
         try_validate(c, sig)
-    sig = [argdesc(IntType, name='ids', required=True, num='N')]
+    sig = [argdesc(CephInt, name='ids', required=True, num='N')]
     print sig
     try_validate('0 1 2' , sig)
     print sig
@@ -442,7 +441,6 @@ def main():
     try_validate('1', sig)
     try_validate('', sig)
     try_validate('s', sig)
-    """
 
     try_validate("osd crush tunables foo", sigs[0])
     try_validate("osd crush tunables legacy", sigs[0])
