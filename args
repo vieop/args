@@ -340,9 +340,13 @@ def parse_json_funcsig(s):
             raise ValueError('JSON sig {} descriptor {} has no type'.
                              format(signame, signum))
         try:
-            # XXX - how to come up with a type object for a named type
-            # without using eval?
-            t = eval(d['type'])
+            # look up type string in our globals() dict; if it's an object
+            # of type types.TypeType, it must be a locally-defined class.
+            # otherwise, let except: set it to the string literal, which
+            # argdesc() knows as a special case for a one-valued Choice.
+            t = globals()[d['type']]
+            if type(t) != types.TypeType: 
+                raise TypeError 
         except:
             t = d['type']
         newsig.append(argdesc(t,
