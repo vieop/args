@@ -430,7 +430,7 @@ def main():
     for c in ['osd stat', 'osd foo']:
         try_validate(c, sig)
     sig = [argdesc('osd'), argdesc('find'),
-           argdesc(int, name='n', required=True)]
+           argdesc(CephInt, name='n', required=True)]
     for c in ['osd find s', 'osd find', 'osd find 1']:
         try_validate(c, sig)
     sig = [argdesc(CephInt, name='ids', required=True, num='N')]
@@ -442,7 +442,7 @@ def main():
     sig = parse_json_funcsig('{"signame":"mylittlesiggy", "sig":[{"type":"literal", "name":"arg1", "required":false}]}')
     try_validate('literal', sig)
     try_validate('iteral', sig)
-    sig = parse_json_funcsig('{"signame":"mybigsiggy", "sig":[{"type":"IntType", "name":"arg1", "required":false}]}')
+    sig = parse_json_funcsig('{"signame":"mybigsiggy", "sig":[{"type":"CephInt", "name":"arg1", "required":false}]}')
     try_validate('1', sig)
     try_validate('', sig)
     try_validate('s', sig)
