@@ -418,7 +418,7 @@ sigs = [
     [argdesc('mon'), argdesc('getmap')],
     [argdesc('mon'), argdesc('dump')],
     [argdesc('mon'), argdesc('add'),
-     argdesc(CephName, required=True), argdesc(CephAddr, required=True)],
+     argdesc(CephName, name="name", required=True), argdesc(CephAddr, name="addr", required=True)],
     [argdesc('mon'), argdesc('remove'), argdesc(CephName)]
 ]
 
