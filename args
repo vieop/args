@@ -403,10 +403,11 @@ def validate(s, signature):
 def try_validate(s, sig):
     try:
         dump = validate(s, sig)
-        print'{!r} ok'.format(s)
+        print'{!r} ok against {}'.format(s, sig)
         print dump
     except Exception as e:
         print'{!r} failed: {}'.format(s, e)
+    print
 
 sigs = [
     [argdesc('osd'), argdesc('crush'), argdesc('tunables'),
