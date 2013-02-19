@@ -333,9 +333,7 @@ def parse_json_funcsig(s):
     except Exception as e:
         print >> sys.stderr, "Couldn't parse JSON funcsig from {}: {}", s, e
     newsig = []
-    signame = sig.setdefault('signame', 'unnamed')
-    if not 'sig' in sig:
-        raise ValueError('JSON sig {} has no "sig" object'.format(signame))
+    signame = sig.get('signame', 'unnamed')
     signum = 1
     for d in sig['sig']:
         if not 'type' in d:
