@@ -375,6 +375,7 @@ def validate(s, signature):
     mysig = copy.deepcopy(signature)
     words = s.split()
     argpos = 1
+    d = dict()
     for desc in mysig:
         setattr(desc, 'numseen', 0)
         while desc.numseen < desc.num:
@@ -392,14 +393,20 @@ def validate(s, signature):
                     break
             # may raise exception
             validate_one(word, desc, argpos)
-            argpos += 1
+            if desc.name in d:
+                d[desc.name] += ' ' + word
+            else:
+                d[desc.name] = word
+        argpos += 1
+    return json.dumps(d)
 
 # convenience function
 
 def try_validate(s, sig):
     try:
-        validate(s, sig)
+        dump = validate(s, sig)
         print'{!r} ok'.format(s)
+        print dump
     except Exception as e:
         print'{!r} failed: {}'.format(s, e)
 
