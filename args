@@ -382,7 +382,7 @@ def validate(s, signature):
                 word = words.pop(0)
             except:
                 # out of input, all of rest better be not required
-                if desc.required and desc.numseen < desc.num:
+                if desc.required and not desc.n and desc.numseen < desc.num:
                     if (desc.n):
                         required = 'at least'
                     else:
