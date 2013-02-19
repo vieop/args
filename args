@@ -357,15 +357,12 @@ def parse_json_funcsig(s):
 
 
 def validate_one(word, desc, argpos):
-    try:
-        desc.instance.valid(word)
-        desc.numseen += 1
-        if desc.n:
-            desc.num = desc.numseen
-    except Exception as e:
-        if not desc.required:
-            pass
-        raise ArgumentError(e)
+    # may raise exception
+    desc.instance.valid(word)
+    desc.numseen += 1
+    if desc.n:
+        desc.num = desc.numseen + 1
+    return True
 
 """
 validate(s,signature)
@@ -393,6 +390,7 @@ def validate(s, signature):
                     raise ArgumentError('saw {} of param[{}]({}): expected {} {}'.format(desc.numseen, argpos, desc, required, desc.num))
                 else:
                     break
+            # may raise exception
             validate_one(word, desc, argpos)
             argpos += 1
 
