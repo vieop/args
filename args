@@ -269,7 +269,7 @@ class CephUUID(CephArgtype):
 # anything else are arguments to pass to the type constructor
 
 class argdesc(object):
-    def __init__(self, t, name=None, num=1, required=False, **kwargs):
+    def __init__(self, t, name='cmd', num=1, required=False, **kwargs):
         if isinstance(t, types.StringTypes):
             self.t = CephChoices
             self.typeargs = dict({'strings':[t]})
