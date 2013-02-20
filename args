@@ -34,7 +34,6 @@ class CephArgtype(object):
 """
 range-limited integers, [+|-][0-9]+ or 0x[0-9a-f]+
 range: list of 1 or 2 ints, [min] or [min,max]
-XXX: signed not working right -129 validates against bits=8
 """
 class CephInt(CephArgtype):
     def __init__(self, range=[]):
@@ -171,7 +170,7 @@ class CephObjectname(CephArgtype):
         return True
 
 """
-pgid, in form N.XXX (N = pool number, XXX = hex pgnum)
+pgid, in form N.xxx (N = pool number, xxx = hex pgnum)
 """
 class CephPgid(CephArgtype):
     def valid(self, s):
@@ -199,7 +198,7 @@ class CephName(CephArgtype):
                 i = int(i)
             except:
                 raise ValueError('osd id ' + i + ' not integer')
-            # XXX could check for valid id if there were a path to do it
+            # could check for valid id?
         return True
 
 """
@@ -259,31 +258,31 @@ class CephUUID(CephArgtype):
 
 ############################################################################
 
-# argdesc(typename, [type-specific kwargs], name='name', num=numallowed, required=False, **kwargs)
+# argdesc(typename, [type-specific kwargs], name='name', n=numallowed, req=False, **kwargs)
 # validation rules:
 # typename: type(**kwargs) will be constructed
 # later, type.validate(w) will be called with a word in that position
 # name is used for parse errors and for constructing JSON output
-# num is a numeric literal or 'n|N', meaning "at least one, but maybe more"
-# required means the argument must be present in the list
+# n is a numeric literal or 'n|N', meaning "at least one, but maybe more"
+# req=True means the argument must be present in the list
 # anything else are arguments to pass to the type constructor
 
 class argdesc(object):
-    def __init__(self, t, name='cmd', num=1, required=False, **kwargs):
+    def __init__(self, t, name='cmd', n=1, req=False, **kwargs):
         if isinstance(t, types.StringTypes):
             self.t = CephChoices
             self.typeargs = dict({'strings':[t]})
-            self.required = True
+            self.req = True
         else:
             self.t = t
             self.typeargs = kwargs
-            self.required = required
+            self.req = req
 
         self.name = name
-        self.n = (num == 'N' or num == 'n')
-        self.num = num
-        if self.n:
-            self.num = 1
+        self.N = (n == 'N' or n == 'n')
+        self.n = n
+        if self.N:
+            self.n = 1
         self.instance = self.t(**self.typeargs)
 
     def __repr__(self):
@@ -312,7 +311,7 @@ in JSON as
 {
 'signame': signature_name
 'sig': [ 
-   'type': type, 'name': paramname, 'num': paramnum, required: True|False
+   'type': type, 'name': paramname, 'n': paramnum, req: True|False
    .
 
    .
@@ -330,6 +329,7 @@ def parse_json_funcsig(s):
         sig = json.loads(s)
     except Exception as e:
         print >> sys.stderr, "Couldn't parse JSON funcsig from {}: {}", s, e
+        raise e
     newsig = []
     signame = sig.get('signame', 'unnamed')
     signum = 1
@@ -349,8 +349,8 @@ def parse_json_funcsig(s):
             t = d['type']
         newsig.append(argdesc(t,
                               name=d.get('name', None),
-                              num=d.get('num', 1),
-                              required=d.get('required', False)))
+                              n=d.get('n', 1),
+                              req=d.get('req', False)))
     return newsig
 
 
@@ -358,8 +358,8 @@ def validate_one(word, desc, argpos):
     # may raise exception
     desc.instance.valid(word)
     desc.numseen += 1
-    if desc.n:
-        desc.num = desc.numseen + 1
+    if desc.N:
+        desc.n = desc.numseen + 1
     return True
 
 """
@@ -376,17 +376,17 @@ def validate(s, signature):
     d = dict()
     for desc in mysig:
         setattr(desc, 'numseen', 0)
-        while desc.numseen < desc.num:
+        while desc.numseen < desc.n:
             try:
                 word = words.pop(0)
             except:
                 # out of input, all of rest better be not required
-                if desc.required and not desc.n and desc.numseen < desc.num:
+                if desc.req and not desc.N and desc.n < desc.num:
                     if (desc.n):
-                        required = 'at least'
+                        req = 'at least'
                     else:
-                        required = 'exactly'
-                    raise ArgumentError('saw {} of param[{}]({}): expected {} {}'.format(desc.numseen, argpos, desc, required, desc.num))
+                        req = 'exactly'
+                    raise ArgumentError('saw {} of param[{}]({}): expected {} {}'.format(desc.numseen, argpos, desc, req, desc.n))
                 else:
                     break
             # may raise exception
@@ -417,7 +417,7 @@ sigs = [
     [argdesc('mon'), argdesc('getmap')],
     [argdesc('mon'), argdesc('dump')],
     [argdesc('mon'), argdesc('add'),
-     argdesc(CephName, name="name", required=True), argdesc(CephAddr, name="addr", required=True)],
+     argdesc(CephName, name="name", req=True), argdesc(CephAddr, name="addr", req=True)],
     [argdesc('mon'), argdesc('remove'), argdesc(CephName)]
 ]
 
@@ -429,19 +429,19 @@ def main():
     for c in ['osd stat', 'osd foo']:
         try_validate(c, sig)
     sig = [argdesc('osd'), argdesc('find'),
-           argdesc(CephInt, name='n', required=True)]
+           argdesc(CephInt, name='n', req=True)]
     for c in ['osd find s', 'osd find', 'osd find 1']:
         try_validate(c, sig)
-    sig = [argdesc(CephInt, name='ids', required=True, num='N')]
+    sig = [argdesc(CephInt, name='ids', req=True, n='N')]
     print sig
     try_validate('0 1 2' , sig)
     print sig
     try_validate('0 1 2 s' , sig)
 
-    sig = parse_json_funcsig('{"signame":"mylittlesiggy", "sig":[{"type":"literal", "name":"arg1", "required":false}]}')
+    sig = parse_json_funcsig('{"signame":"mylittlesiggy", "sig":[{"type":"literal", "name":"arg1", "req":false}]}')
     try_validate('literal', sig)
     try_validate('iteral', sig)
-    sig = parse_json_funcsig('{"signame":"mybigsiggy", "sig":[{"type":"CephInt", "name":"arg1", "required":false}]}')
+    sig = parse_json_funcsig('{"signame":"mybigsiggy", "sig":[{"type":"CephInt", "name":"arg1", "req":false}]}')
     try_validate('1', sig)
     try_validate('', sig)
     try_validate('s', sig)
