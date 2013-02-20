@@ -29,15 +29,19 @@ class CephArgtype(object):
         """
         pass
     def __repr__(self):
-        return '{}(\'{}\')'.format(self.__class__.__name__, self.typeargs)
+        a = ''
+        if hasattr(self, 'typeargs'):
+            a = self.typeargs;
+        s = ''
+        return '{}(\'{}\')'.format(self.__class__.__name__, a)
 
 """
 range-limited integers, [+|-][0-9]+ or 0x[0-9a-f]+
 range: list of 1 or 2 ints, [min] or [min,max]
 """
 class CephInt(CephArgtype):
-    def __init__(self, range=[]):
-        self.range = range
+    def __init__(self, range=''):
+        self.range = list(range.split('|'))
 
     def valid(self, s):
         try: 
@@ -54,13 +58,20 @@ class CephInt(CephArgtype):
             val = -val - 1
         return True
 
+    def __str__(self):
+        r = ''
+        if len(self.range):
+            r = self.range
+        return '{}({})'.format(self.__class__.__name__, r)
+	 
+
 """
 range-limited float type
-range: list of 1 or 2 floats, [min] or [min, max]
-"""
+range: list of 1 or 2 floats, [min] or [min, max] """
 class CephFloat(CephArgtype):
-    def __init__(self, range=[]):
-        self.range = range
+    def __init__(self, range=''):
+        self.range = range.split('|')
+        print 'self.range: ', self.range
 
     def valid(self, s):
         try:
@@ -75,6 +86,12 @@ class CephFloat(CephArgtype):
                 raise ValueError("{} not in range {}".format(val, self.range))
         return True
 
+    def __str__(self):
+        r = ''
+        if len(self.range):
+            r = self.range
+        return '{}({})'.format(self.__class__.__name__, r)
+
 """
 String.  Not much use for this; maybe we might use illegal chars
 for something?
@@ -88,6 +105,12 @@ class CephString(CephArgtype):
             if c in s:
                 raise ValueError("bad char {} in {}".format(c, s))
         return True
+
+    def __str__(self):
+	b = ''
+        if len(self.badchars):
+            b = self.badchars
+	s = '{}({})'.format(self.__class__.__name__, b)
         
 """
 Admin socket path; validated for openability and S_ISFIFO
@@ -206,13 +229,19 @@ Set of string literals; init with valid choices
 """
 
 class CephChoices(CephArgtype):
-    def __init__(self, strings=[], **kwargs):
-        self.strings=strings
+    def __init__(self, strings='', **kwargs):
+        self.strings=strings.split('|')
 
     def valid(self, s):
         if not s in self.strings:
             raise ValueError("{} not in {}".format(s, self.strings))
         return True
+
+    def __str__(self):
+        if len(self.strings) == 1:
+            return '\'{}\''.format(self.strings[0])
+        else:
+            return '{}({})'.format(self.__class__.__name__, '|'.join(self.strings))
 
 """
 Openable file
@@ -264,14 +293,14 @@ class CephUUID(CephArgtype):
 # later, type.validate(w) will be called with a word in that position
 # name is used for parse errors and for constructing JSON output
 # n is a numeric literal or 'n|N', meaning "at least one, but maybe more"
-# req=True means the argument must be present in the list
+# req=False means the argument need not be present in the list
 # anything else are arguments to pass to the type constructor
 
 class argdesc(object):
-    def __init__(self, t, name='cmd', n=1, req=False, **kwargs):
+    def __init__(self, t, name='cmd', n=1, req=True, **kwargs):
         if isinstance(t, types.StringTypes):
             self.t = CephChoices
-            self.typeargs = dict({'strings':[t]})
+            self.typeargs = dict({'strings':t})
             self.req = True
         else:
             self.t = t
@@ -298,25 +327,27 @@ class argdesc(object):
         return r[:-2] + ')'
 
     def __str__(self):
-        if self.name is None:
-            return self.t.__name__ + '()'
+        if not self.req:
+            s = '{' + str(self.instance) + '}'
         else:
-            return self.name + '()'
+            s = str(self.instance)
+        return s
 
 """
 parse_json_funcsig(s)
 
 A function signature is an array of argdesc; it can be represented 
 in JSON as 
-{
-'signame': signature_name
-'sig': [ 
+{'arg1':
+  {
    'type': type, 'name': paramname, 'n': paramnum, req: True|False
    .
 
    .
    .
-]
+  }
+  .
+  .
 }
 
 Parse the string s and return a function signature (or thrown an
@@ -325,32 +356,39 @@ exception).
 
 def parse_json_funcsig(s):
     import json
+    argnum = 0
     try:
         sig = json.loads(s)
     except Exception as e:
-        print >> sys.stderr, "Couldn't parse JSON funcsig from {}: {}", s, e
+        print >> sys.stderr, "Couldn't parse JSON funcsig from {}: {}".format(s, e)
         raise e
     newsig = []
-    signame = sig.get('signame', 'unnamed')
-    signum = 1
-    for d in sig['sig']:
-        if not 'type' in d:
-            raise ValueError('JSON sig {} descriptor {} has no type'.
-                             format(signame, signum))
-        try:
+    for d in sig:
+        argnum += 1
+        if isinstance(d, types.StringTypes):
+            t = d
+            d = {'type':t, 'name':'arg{}'.format(argnum)}
+        else:
+            if not 'type' in d:
+                raise TypeError('JSON descriptor{} has no type'.format(sig))
             # look up type string in our globals() dict; if it's an object
             # of type types.TypeType, it must be a locally-defined class.
-            # otherwise, let except: set it to the string literal, which
-            # argdesc() knows as a special case for a one-valued Choice.
-            t = globals()[d['type']]
-            if type(t) != types.TypeType: 
-                raise TypeError 
-        except:
-            t = d['type']
+            # otherwise, we haven't a clue.
+            if d['type'] in globals():
+                t = globals()[d['type']]
+                if type(t) != types.TypeType: 
+                    raise TypeError('unknown type {}'.format(d['type']))
+            else:
+                raise TypeError('no type found in {}'.format(d))
+        kwargs = dict()
+        for key, val in d.items():
+            if key not in ['type', 'name', 'n', 'req']:
+                kwargs[key] = val
         newsig.append(argdesc(t,
                               name=d.get('name', None),
                               n=d.get('n', 1),
-                              req=d.get('req', False)))
+                              req=d.get('req', True),
+                              **kwargs))
     return newsig
 
 
@@ -409,21 +447,7 @@ def try_validate(s, sig):
         print'{!r} failed: {}'.format(s, e)
     print
 
-sigs = [
-    [argdesc('osd'), argdesc('crush'), argdesc('tunables'),
-     argdesc(CephChoices,
-             strings=['legacy', 'argonaut', 'bobtail', 'optimal', 'default'])],
-    [argdesc('mon'), argdesc('stat')],
-    [argdesc('mon'), argdesc('getmap')],
-    [argdesc('mon'), argdesc('dump')],
-    [argdesc('mon'), argdesc('add'),
-     argdesc(CephName, name="name", req=True), argdesc(CephAddr, name="addr", req=True)],
-    [argdesc('mon'), argdesc('remove'), argdesc(CephName)]
-]
-
-def main():
-    #global cluster
-    #cluster = rados.Rados(conffile='')
+def selftest():
     sig = [argdesc('osd'), argdesc('stat')]
     print sig
     for c in ['osd stat', 'osd foo']:
@@ -445,6 +469,18 @@ def main():
     try_validate('1', sig)
     try_validate('', sig)
     try_validate('s', sig)
+
+    sigs = [
+	[argdesc('osd'), argdesc('crush'), argdesc('tunables'),
+	 argdesc(CephChoices,
+		 strings='legacy|argonaut|bobtail|optimal|default')],
+	[argdesc('mon'), argdesc('stat')],
+	[argdesc('mon'), argdesc('getmap')],
+	[argdesc('mon'), argdesc('dump')],
+	[argdesc('mon'), argdesc('add'),
+	 argdesc(CephName, name="name", req=True), argdesc(CephAddr, name="addr", req=True)],
+	[argdesc('mon'), argdesc('remove'), argdesc(CephName)]
+    ]
 
     try_validate("osd crush tunables foo", sigs[0])
     try_validate("osd crush tunables legacy", sigs[0])
@@ -476,6 +512,17 @@ def main():
     try_validate('0.0', floatsig)
     try_validate('-0.0', floatsig)
     try_validate('-0.0000001', floatsig)
+
+def main():
+    #global cluster
+    #cluster = rados.Rados(conffile='')
+    for a in sys.argv[1:]:
+	sig = parse_json_funcsig(a)
+
+	print '[',
+	for d in sig:
+	    print str(d),
+        print "]"
 
 if __name__ == '__main__':
     main()
