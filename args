@@ -44,7 +44,7 @@ class CephInt(CephArgtype):
         self.range = list(range.split('|'))
 
     def valid(self, s):
-        try: 
+        try:
             val = long(s)
         except:
             raise ValueError("{} doesn't represent an int".format(s))
@@ -61,9 +61,9 @@ class CephInt(CephArgtype):
     def __str__(self):
         r = ''
         if len(self.range):
-            r = self.range
-        return '{}({})'.format(self.__class__.__name__, r)
-	 
+            r = "(range {})".format(self.range)
+        return 'integer{}'.format(r)
+
 
 """
 range-limited float type
@@ -89,8 +89,8 @@ class CephFloat(CephArgtype):
     def __str__(self):
         r = ''
         if len(self.range):
-            r = self.range
-        return '{}({})'.format(self.__class__.__name__, r)
+            r = "(range {})".format(self.range)
+        return 'float{}'.format(r)
 
 """
 String.  Not much use for this; maybe we might use illegal chars
@@ -107,11 +107,11 @@ class CephString(CephArgtype):
         return True
 
     def __str__(self):
-	b = ''
+        b = ''
         if len(self.badchars):
-            b = self.badchars
-	s = '{}({})'.format(self.__class__.__name__, b)
-        
+            b = '(without chars in {})'.format(self.badchars)
+        return 'string{}'.format(b)
+
 """
 Admin socket path; validated for openability and S_ISFIFO
 """
@@ -125,6 +125,9 @@ class CephSocketpath(CephArgtype):
         if not stat.S_ISFIFO(mode):
             raise ValueError('socket path {} is not a FIFO'.format(s))
         return True
+    def __str__(self):
+
+        return 'Admin socket path'
 
 """
 IP address (v4 or v6) with optional port
@@ -175,6 +178,9 @@ class CephAddr(CephArgtype):
             raise ValueError("{} not a valid port number".format(p))
         return True
 
+    def __str__(self):
+        return 'IPaddr[:port]' 
+
 """
 Pool name; checked for presence in cluster
 """
@@ -184,6 +190,9 @@ class CephPoolname(CephArgtype):
         #    raise ValueError("pool {} does not exist".format(s))
         return True
 
+    def __str__(self):
+        return 'Ceph poolname'
+
 """
 Object name.  Maybe should be combined with Pool name as they're always
 present in pairs, and then could be checked for presence
@@ -191,6 +200,9 @@ present in pairs, and then could be checked for presence
 class CephObjectname(CephArgtype):
     def valid(self, s):
         return True
+
+    def __str__(self):
+        return 'Ceph objectname'
 
 """
 pgid, in form N.xxx (N = pool number, xxx = hex pgnum)
@@ -205,6 +217,9 @@ class CephPgid(CephArgtype):
         except:
             raise ValueError('pgnum {} not hex integer'.format(pgnum))
         return True
+
+    def __str__(self):
+        return 'Ceph pgid (p.xxx)'
 
 """
 Name, or type.id, where type is osd|mon|client|mds, and id is a base10 int
@@ -224,6 +239,9 @@ class CephName(CephArgtype):
             # could check for valid id?
         return True
 
+    def __str__(self):
+        return 'Ceph name (type.id)'
+
 """
 Set of string literals; init with valid choices
 """
@@ -241,7 +259,7 @@ class CephChoices(CephArgtype):
         if len(self.strings) == 1:
             return '\'{}\''.format(self.strings[0])
         else:
-            return '{}({})'.format(self.__class__.__name__, '|'.join(self.strings))
+            return 'one of \'{}\''.format('|'.join(self.strings))
 
 """
 Openable file
@@ -252,6 +270,9 @@ class CephFilepath(CephArgtype):
             open(s, 'a+')
         except Exception as e:
             raise ValueError('can\'t open {}: {}'.format(s, e))
+
+    def __str__(self):
+        return 'Output filename'
 
 """
 'Fragment' ??? XXX
@@ -274,6 +295,10 @@ class CephFragment(CephArgtype):
             raise ValueError('can\'t convert {} to integer'.format(bits))
         return True
 
+    def __str__(self):
+        return "CephFS fragment ID (0xvvv/bbb)"
+
+
 """ 
 CephUUID: pretty self-explanatory
 """ 
@@ -284,6 +309,9 @@ class CephUUID(CephArgtype):
         except Exception as e:
             raise ValueError('invalid UUID {}: {}'.format(s, e))
         return True
+
+    def __str__(self):
+        return 'UUID'
 
 ############################################################################
 

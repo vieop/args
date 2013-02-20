@@ -153,7 +153,7 @@ main(int argc, char **argv)
     "osd pool create type=CephPoolname,name=pool type=CephInt,name=pg_num type=CephInt,name=pgp_num,req=False",
     "osd pool delete type=CephPoolname,name=pool type=CephPoolname,name=pool2 --yes-i-really-really-mean-it",
     "osd pool rename type=CephPoolname,name=from type=CephPoolname,name=to",
-    "osd type=CephChoices,strings=set|get,name=op type=CephPoolname,name=pool type=CephChoices,strings=size|min_size|crash_replay_interval|pg_num|pgp_num|crush_ruleset,name=var, type=CephInt,name=n",
+    "osd pool type=CephChoices,strings=set|get,name=op type=CephPoolname,name=pool type=CephChoices,strings=size|min_size|crash_replay_interval|pg_num|pgp_num|crush_ruleset,name=var, type=CephInt,name=n",
     "osd reweight-by-utilization type=CephInt,name=oload,range=100|10000",
     "osd thrash type=CephInt,name=num_epochs",
     ""
