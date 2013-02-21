@@ -159,8 +159,8 @@ osd
 	lspools {auid XXX deprecated?}
 	blacklist
 		ls
-		add {addr} [{until}]
-		rm {addr}
+		add {entityaddr} [{until}]
+		rm {entityaddr}
 	crush
 		rule list/ls
 		rule dump

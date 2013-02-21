@@ -7,12 +7,23 @@ import stat
 import json
 import copy
 import types
+import subprocess
+import socket
+import json
 
+"""
+Something wrong with number of arguments
+"""
 class ArgumentError(Exception):
     pass
 
 """
 Base class for all Ceph argument types
+
+Instantiating an object sets any validation parameters 
+(allowable strings, numeric ranges, etc.).  The 'valid'
+method validates a string against that initialized instance,
+throwing ArgumentError if there's a problem.
 """
 class CephArgtype(object):
     def __init__(self, **kwargs):
@@ -21,19 +32,37 @@ class CephArgtype(object):
         from kwargs (fixed string sets, integer ranges, etc)
         """
         pass
-    def valid(self, s):
+
+    def valid(self, s, partial=False):
         """
         run validation against given string s (generally one word);
+        partial means to accept partial string matches (begins-with).
         if cool, return True
-        if not, throw ValueError(msg-as-to-why)
+        if not, throw ArgumentError(msg-as-to-why)
         """
         pass
+
     def __repr__(self):
+        """
+        return string representation of description of type.  Note,
+        this is not a representation of the actual value.  Subclasses
+        probably also override __str__() to give a more user-friendly
+        'name/type' description for use in command format help messages.
+        """
         a = ''
         if hasattr(self, 'typeargs'):
             a = self.typeargs;
         s = ''
         return '{}(\'{}\')'.format(self.__class__.__name__, a)
+
+    def __str__(self):
+        """
+        where __repr__ (ideally) returns a string that could be used to
+        reproduce the object, __str__ returns one you'd like to see in
+        print messages.  Use __str__ to format the argtype descriptor
+        as it would be useful in a command usage message.
+        """
+        return '<{}>'.format(self.__class__.__name__)
 
 """
 range-limited integers, [+|-][0-9]+ or 0x[0-9a-f]+
@@ -41,28 +70,33 @@ range: list of 1 or 2 ints, [min] or [min,max]
 """
 class CephInt(CephArgtype):
     def __init__(self, range=''):
-        self.range = list(range.split('|'))
+        if isinstance(range, types.StringType):
+            if range == '':
+                self.range = list()
+            else:
+                self.range = list(range.split('|'))
+                self.range = map(int, self.range)
+        else:
+            self.range = range
 
-    def valid(self, s):
+    def valid(self, s, partial=False):
         try:
             val = long(s)
-        except:
-            raise ValueError("{} doesn't represent an int".format(s))
+        except ValueError:
+            raise ArgumentError("{} doesn't represent an int".format(s))
         if len(self.range) == 2:
             if val < self.range[0] or val > self.range[1]:
-                raise ValueError("{} not in range {}".format(val, self.range))
+                raise ArgumentError("{} not in range {}".format(val, self.range))
         elif len(self.range) == 1:
             if val < self.range[0]:
-                raise ValueError("{} not in range {}".format(val, self.range))
-        if val < 0:
-            val = -val - 1
+                raise ArgumentError("{} not in range {}".format(val, self.range))
         return True
 
     def __str__(self):
         r = ''
         if len(self.range):
-            r = "(range {})".format(self.range)
-        return 'integer{}'.format(r)
+            r = '(range {} len {})'.format(self.range, len(self.range))
+        return '<integer{}>'.format(r)
 
 
 """
@@ -70,27 +104,33 @@ range-limited float type
 range: list of 1 or 2 floats, [min] or [min, max] """
 class CephFloat(CephArgtype):
     def __init__(self, range=''):
-        self.range = range.split('|')
-        print 'self.range: ', self.range
+        if isinstance(range, types.StringType):
+            if range == '':
+                self.range = list()
+            else:
+                self.range = list(range.split('|'))
+                self.range = map(float, self.range)
+        else:
+            self.range = range
 
-    def valid(self, s):
+    def valid(self, s, partial=False):
         try:
             val = float(s)
-        except:
-            raise ValueError("{} doesn't represent a float".format(s))
+        except ValueError:
+            raise ArgumentError("{} doesn't represent a float".format(s))
         if len(self.range) == 2:
             if val < self.range[0] or val > self.range[1]:
-                raise ValueError("{} not in range {}".format(val, self.range))
+                raise ArgumentError("{} not in range {}".format(val, self.range))
         elif len(self.range) == 1:
             if val < self.range[0]:
-                raise ValueError("{} not in range {}".format(val, self.range))
+                raise ArgumentError("{} not in range {}".format(val, self.range))
         return True
 
     def __str__(self):
         r = ''
         if len(self.range):
             r = "(range {})".format(self.range)
-        return 'float{}'.format(r)
+        return '<float{}>'.format(r)
 
 """
 String.  Not much use for this; maybe we might use illegal chars
@@ -100,42 +140,36 @@ class CephString(CephArgtype):
     def __init__(self, badchars=''):
         self.badchars = badchars
 
-    def valid(self, s):
-        for c in badchars:
+    def valid(self, s, partial=False):
+        for c in self.badchars:
             if c in s:
-                raise ValueError("bad char {} in {}".format(c, s))
+                raise ArgumentError("bad char {} in {}".format(c, s))
         return True
 
     def __str__(self):
         b = ''
         if len(self.badchars):
             b = '(without chars in {})'.format(self.badchars)
-        return 'string{}'.format(b)
+        return '<string{}>'.format(b)
 
 """
-Admin socket path; validated for openability and S_ISFIFO
+Admin socket path; check that it's readable and S_ISSOCK
 """
 class CephSocketpath(CephArgtype):
-    def valid(self, s):
-        try:
-            open(s, "r")
-        except:
-            raise ValueError('socket path: {} can\'t be opened'.format(s))
+    def valid(self, s, partial=False):
         mode = os.stat(s).st_mode
-        if not stat.S_ISFIFO(mode):
-            raise ValueError('socket path {} is not a FIFO'.format(s))
+        if not stat.S_ISSOCK(mode):
+            raise ArgumentError('socket path {} is not a FIFO'.format(s))
         return True
     def __str__(self):
-
-        return 'Admin socket path'
+        return '<admin-socket-path>'
 
 """
 IP address (v4 or v6) with optional port
 """
-class CephAddr(CephArgtype):
-    def valid(self, s):
+class CephIPAddr(CephArgtype):
+    def valid(self, s, partial=False):
         # parse off port, use socket to validate addr
-        import socket
         type = 6
         if s.startswith('['):
             type = 6
@@ -147,25 +181,25 @@ class CephAddr(CephArgtype):
                 a = s[:port]
                 p = s[port+1:]
                 if int(p) > 65535:
-                    raise ValueError('{}: invalid IPv4 port'.format(p))
+                    raise ArgumentError('{}: invalid IPv4 port'.format(p))
             else:
                 a = s
                 p = None
             try:
                 socket.inet_pton(socket.AF_INET, a)
             except:
-                raise ValueError('{}: invalid IPv4 address'.format(a))
+                raise ArgumentError('{}: invalid IPv4 address'.format(a))
         else:
             # v6
             if s.startswith('['):
                 end = s.find(']')
                 if end == -1:
-                    raise ValueError('{} missing terminating ]'.format(s))
+                    raise ArgumentError('{} missing terminating ]'.format(s))
                 if s[end+1] == ':':
                     try:
                         p = int(s[end+2])
                     except:
-                        raise ValueError('{}: bad port number'.format(s))
+                        raise ArgumentError('{}: bad port number'.format(s))
                 a = s[1:end]
             else:
                 a = s
@@ -173,13 +207,23 @@ class CephAddr(CephArgtype):
             try:
                 socket.inet_pton(socket.AF_INET6, a)
             except:
-                raise ValueError('{} not valid IPv6 address'.format(s))
+                raise ArgumentError('{} not valid IPv6 address'.format(s))
         if p is not None and long(p) > 65535:
-            raise ValueError("{} not a valid port number".format(p))
+            raise ArgumentError("{} not a valid port number".format(p))
         return True
 
     def __str__(self):
-        return 'IPaddr[:port]' 
+        return '<IPaddr[:port]>' 
+
+class CephEntityAddr(CephIPAddr):
+    def valid(self,s):
+        ip, nonce = s.split('/')
+        if not super(CephIPAddr, self).valid(self, ip):
+            raise ArgumentError('CephEntityAddr {}: ip address invalid'.format(s))
+        return True
+
+    def __str__(self):
+        return '<EntityAddr>'
 
 """
 Pool name; checked for presence in cluster
@@ -191,56 +235,56 @@ class CephPoolname(CephArgtype):
         return True
 
     def __str__(self):
-        return 'Ceph poolname'
+        return '<poolname>'
 
 """
 Object name.  Maybe should be combined with Pool name as they're always
 present in pairs, and then could be checked for presence
 """
 class CephObjectname(CephArgtype):
-    def valid(self, s):
+    def valid(self, s, partial=False):
         return True
 
     def __str__(self):
-        return 'Ceph objectname'
+        return '<objectname>'
 
 """
 pgid, in form N.xxx (N = pool number, xxx = hex pgnum)
 """
 class CephPgid(CephArgtype):
-    def valid(self, s):
+    def valid(self, s, partial=False):
         if s.find('.') == -1:
-            raise ValueError('pgid has no .')
+            raise ArgumentError('pgid has no .')
         poolid, pgnum = s.split('.')
         try:
             pgnum = int(pgnum, 16)
         except:
-            raise ValueError('pgnum {} not hex integer'.format(pgnum))
+            raise ArgumentError('pgnum {} not hex integer'.format(pgnum))
         return True
 
     def __str__(self):
-        return 'Ceph pgid (p.xxx)'
+        return '<pgid (p.xxx)>'
 
 """
 Name, or type.id, where type is osd|mon|client|mds, and id is a base10 int
 """
 class CephName(CephArgtype):
-    def valid(self, s):
+    def valid(self, s, partial=False):
         if s.find('.') == -1:
-            raise ValueError('no .')
+            raise ArgumentError('no .')
         t, i = s.split('.')
         if not t in ('osd', 'mon', 'client', 'mds'):
-            raise ValueError('unknown type ' + self.t)
+            raise ArgumentError('unknown type ' + self.t)
         if t == 'osd':
             try:
                 i = int(i)
             except:
-                raise ValueError('osd id ' + i + ' not integer')
+                raise ArgumentError('osd id ' + i + ' not integer')
             # could check for valid id?
         return True
 
     def __str__(self):
-        return 'Ceph name (type.id)'
+        return '<name (type.id)>'
 
 """
 Set of string literals; init with valid choices
@@ -250,68 +294,75 @@ class CephChoices(CephArgtype):
     def __init__(self, strings='', **kwargs):
         self.strings=strings.split('|')
 
-    def valid(self, s):
-        if not s in self.strings:
-            raise ValueError("{} not in {}".format(s, self.strings))
-        return True
+    def valid(self, s, partial=False):
+        if not partial:
+            if not s in self.strings:
+                raise ArgumentError("{} not in {}".format(s, self.strings))
+            return True
+
+        # partial
+        for t in self.strings:
+            if t.beginswith(s):
+                return True
+        raise ArgumentError("{} not in {}".format(s, self.strings))
 
     def __str__(self):
         if len(self.strings) == 1:
-            return '\'{}\''.format(self.strings[0])
+            return '{}'.format(self.strings[0])
         else:
-            return 'one of \'{}\''.format('|'.join(self.strings))
+            return '<one of \'{}\'>'.format('|'.join(self.strings))
 
 """
 Openable file
 """
 class CephFilepath(CephArgtype):
-    def valid(self, s):
+    def valid(self, s, partial=False):
         try:
             open(s, 'a+')
         except Exception as e:
-            raise ValueError('can\'t open {}: {}'.format(s, e))
+            raise ArgumentError('can\'t open {}: {}'.format(s, e))
 
     def __str__(self):
-        return 'Output filename'
+        return '<outfilename>'
 
 """
 'Fragment' ??? XXX
 """
 class CephFragment(CephArgtype):
-   def valid(self, s):
+    def valid(self, s, partial=False):
         if s.find('/') == -1:
-            raise ValueError('{}: no /'.format(s))      
+            raise ArgumentError('{}: no /'.format(s))
         val, bits = s.split('/')
         # XXX is this right?
         if not val.startswith('0x'):
-            raise ValueError("{} not a hex integer".format(val))
+            raise ArgumentError("{} not a hex integer".format(val))
         try:
             long(val)
         except:
-            raise ValueError('can\'t convert {} to integer'.format(val))
+            raise ArgumentError('can\'t convert {} to integer'.format(val))
         try:
             long(bits)
         except:
-            raise ValueError('can\'t convert {} to integer'.format(bits))
+            raise ArgumentError('can\'t convert {} to integer'.format(bits))
         return True
 
     def __str__(self):
-        return "CephFS fragment ID (0xvvv/bbb)"
+        return "<CephFS fragment ID (0xvvv/bbb)>"
 
 
 """ 
 CephUUID: pretty self-explanatory
-""" 
+"""
 class CephUUID(CephArgtype):
-    def valid(self, s):
+    def valid(self, s, partial=False):
         try:
             uuid.UUID(s)
         except Exception as e:
-            raise ValueError('invalid UUID {}: {}'.format(s, e))
+            raise ArgumentError('invalid UUID {}: {}'.format(s, e))
         return True
 
     def __str__(self):
-        return 'UUID'
+        return '<uuid>'
 
 ############################################################################
 
@@ -333,7 +384,7 @@ class argdesc(object):
         else:
             self.t = t
             self.typeargs = kwargs
-            self.req = req
+            self.req = bool(req == True or req == 'True')
 
         self.name = name
         self.N = (n == 'N' or n == 'n')
@@ -355,11 +406,27 @@ class argdesc(object):
         return r[:-2] + ')'
 
     def __str__(self):
-        if not self.req:
-            s = '{' + str(self.instance) + '}'
+        #s = '{}({})'.format(self.name, str(self.instance))
+        if self.t == CephChoices and len(self.instance.strings) == 1:
+            s = '{}'.format(str(self.instance))
         else:
-            s = str(self.instance)
+            s = '{}({})'.format(self.name, str(self.instance))
+            if self.N:
+                s += '[' + str(self.instance) + '...]'
+        if not self.req:
+            s = '{' + s + '}'
         return s
+
+def concise_sig(sig):
+    first = True
+    s = ''
+    for d in sig:
+        if first:
+            first = False
+        else:
+            s += ' '
+        s += str(d)
+    return s
 
 """
 parse_json_funcsig(s)
@@ -383,7 +450,6 @@ exception).
 """
 
 def parse_json_funcsig(s):
-    import json
     argnum = 0
     try:
         sig = json.loads(s)
@@ -420,16 +486,45 @@ def parse_json_funcsig(s):
     return newsig
 
 
-def validate_one(word, desc, argpos):
+def validate_one(word, desc, partial=False):
     # may raise exception
-    desc.instance.valid(word)
+    desc.instance.valid(word, partial)
     desc.numseen += 1
     if desc.N:
         desc.n = desc.numseen + 1
     return True
 
 """
-validate(s,signature)
+matchnum(s, signature, partial=False)
+
+Returns number of arguments matched in s against signature.
+Can be used to determine most-likely command for full or partial
+matches (partial applies to string matches).
+"""
+
+def matchnum(s, signature, partial=False):
+    mysig = copy.deepcopy(signature)
+    words = s.split()
+    matched = 0
+    for desc in mysig:
+        setattr(desc, 'numseen', 0)
+        while desc.numseen < desc.n:
+            try:
+                word = words.pop(0)
+            except:
+                # out of input, all of rest better be not required
+                if desc.req and not desc.N and desc.numseen < desc.n:
+                    return matched
+            # may raise exception
+            try:
+                validate_one(word, desc, partial)
+            except Exception as e:
+                return matched
+        matched += 1
+    return matched
+
+"""
+validate(s, signature)
 
 Assumes s represents a possible command input following format of
 signature.  Runs a validation; no exception means it's OK
@@ -447,16 +542,16 @@ def validate(s, signature):
                 word = words.pop(0)
             except:
                 # out of input, all of rest better be not required
-                if desc.req and not desc.N and desc.n < desc.num:
+                if desc.req and not desc.N and desc.numseen < desc.n:
                     if (desc.n):
                         req = 'at least'
                     else:
                         req = 'exactly'
-                    raise ArgumentError('saw {} of param[{}]({}): expected {} {}'.format(desc.numseen, argpos, desc, req, desc.n))
+                    raise ArgumentError('saw {} of {}({}): expected {} {}'.format(desc.numseen, desc.name, desc, req, desc.n))
                 else:
                     break
             # may raise exception
-            validate_one(word, desc, argpos)
+            validate_one(word, desc)
             if desc.name in d:
                 d[desc.name] += ' ' + word
             else:
@@ -499,15 +594,15 @@ def selftest():
     try_validate('s', sig)
 
     sigs = [
-	[argdesc('osd'), argdesc('crush'), argdesc('tunables'),
-	 argdesc(CephChoices,
-		 strings='legacy|argonaut|bobtail|optimal|default')],
-	[argdesc('mon'), argdesc('stat')],
-	[argdesc('mon'), argdesc('getmap')],
-	[argdesc('mon'), argdesc('dump')],
-	[argdesc('mon'), argdesc('add'),
-	 argdesc(CephName, name="name", req=True), argdesc(CephAddr, name="addr", req=True)],
-	[argdesc('mon'), argdesc('remove'), argdesc(CephName)]
+        [argdesc('osd'), argdesc('crush'), argdesc('tunables'),
+         argdesc(CephChoices,
+                 strings='legacy|argonaut|bobtail|optimal|default')],
+        [argdesc('mon'), argdesc('stat')],
+        [argdesc('mon'), argdesc('getmap')],
+        [argdesc('mon'), argdesc('dump')],
+        [argdesc('mon'), argdesc('add'),
+         argdesc(CephName, name="name", req=True), argdesc(CephAddr, name="addr", req=True)],
+        [argdesc('mon'), argdesc('remove'), argdesc(CephName)]
     ]
 
     try_validate("osd crush tunables foo", sigs[0])
@@ -541,16 +636,65 @@ def selftest():
     try_validate('-0.0', floatsig)
     try_validate('-0.0000001', floatsig)
 
+# this is what will be opened, with these args, to snarf a set of
+# of command descriptors, one per line, each one parseable by 
+# parse_json_funcsig into a signature.
+COMMAND = './cmd'
+
 def main():
     #global cluster
     #cluster = rados.Rados(conffile='')
-    for a in sys.argv[1:]:
-	sig = parse_json_funcsig(a)
+    verbose = True
 
-	print '[',
-	for d in sig:
-	    print str(d),
-        print "]"
+    # fetch JSON sigs from command
+    p = subprocess.Popen('./cmd', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    outdata, errdata = p.communicate()
+    if (len(errdata)):
+        print "error: ", errdata
+        sys.exit(1)
+
+    sigs = list()
+    for a in outdata.split('\n'):
+        if len(a.strip()) == 0:
+            continue
+        sig = parse_json_funcsig(a)
+        sigs.append(sig)
+
+        if verbose:
+            print concise_sig(sig)
+
+    # validate input args against list of sigs
+
+    args = ' '.join(sys.argv[1:])
+    if len(args) == 0:
+        sys.exit(0)
+
+    found = None
+    max = 0
+    bestsigs = []
+    for sig in sigs:
+        matched = matchnum(args, sig, partial=True)
+        if (matched > max):
+            if verbose:
+                print "better match: {} > {}:{} ".format(matched, max, sig)
+            max = matched
+            bestsigs = [sig]
+        elif matched == max:
+            bestsigs.append(sig) 
+
+    for sig in bestsigs:
+        try:
+            print validate(args, sig)
+            found = sig
+            break
+        except Exception as e:
+            if verbose:
+                print >> sys.stderr, "almost {}:\n** {}".format(concise_sig(sig), e)
+            pass
+
+    if found is None:
+        print '{}: invalid command'.format(args)
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
