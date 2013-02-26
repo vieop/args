@@ -561,7 +561,9 @@ validate(s, signature)
 
 Assumes s represents a possible command input following format of
 signature.  Runs a validation; no exception means it's OK.  Return
-a string of the form 'argname:value [argname:value ...]'
+a dict containing all arguments except those named __opcode* 
+which is set when parsing JSON for a descriptor containing an otherwise- 
+unadorned string (i.e. the leading words on a command).
 """
 
 def validate(s, signature):
@@ -591,14 +593,15 @@ def validate(s, signature):
             else:
                 d[desc.name] = desc.instance.val
         argpos += 1
-    retval = ''
-    for k,v in d.iteritems():
-        if k.startswith('__opcode'):
-            continue
-        retval += '{}:{} '.format(k,v)
-    return retval.rstrip()
+    # strip out __opcode items
+    retd = {}
+    for k,v in d.items():
+        if not k.startswith('__opcode'):
+           retd[k] = v
+    print "validate returning", retd
+    return retd
 
-# convenience function
+# convenience function for testing
 
 def try_validate(s, sig):
     try:
@@ -686,6 +689,11 @@ def main():
     command = os.environ.get('COMMAND', './cmd')
 
     # fetch JSON sigs from command
+    # each line corresponds to the opcode that will be sent back
+    # as part of the validated argument JSON object; make sure
+    # the receiving code matches position in the command output
+    # with the opcode it expects to receive.
+
     p = subprocess.Popen(command.split(), stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
     outdata, errdata = p.communicate()
@@ -721,8 +729,9 @@ def main():
     for opsig in bestsigs:
         for (op, sig) in opsig.iteritems():
             try:
-                ret = validate(args, sig)
-                print '"opcode:{} {}"'.format(op, ret)
+                valid_dict = validate(args, sig)
+                valid_dict['opcode'] = op
+                print json.dumps(valid_dict)
                 found = sig
                 break
             except ArgumentError as e:
