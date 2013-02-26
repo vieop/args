@@ -11,9 +11,18 @@ import subprocess
 import socket
 
 """
-Something wrong with number of arguments
+Something wrong with arguments
 """
 class ArgumentError(Exception):
+    pass
+
+class ArgumentNumberError(ArgumentError):
+    pass
+
+class ArgumentFormatError(ArgumentError):
+    pass
+
+class ArgumentValidError(ArgumentError):
     pass
 
 """
@@ -82,13 +91,13 @@ class CephInt(CephArgtype):
         try:
             val = long(s)
         except ValueError:
-            raise ArgumentError("{} doesn't represent an int".format(s))
+            raise ArgumentValidError("{} doesn't represent an int".format(s))
         if len(self.range) == 2:
             if val < self.range[0] or val > self.range[1]:
-                raise ArgumentError("{} not in range {}".format(val, self.range))
+                raise ArgumentValidError("{} not in range {}".format(val, self.range))
         elif len(self.range) == 1:
             if val < self.range[0]:
-                raise ArgumentError("{} not in range {}".format(val, self.range))
+                raise ArgumentValidError("{} not in range {}".format(val, self.range))
         return True
 
     def __str__(self):
@@ -116,13 +125,13 @@ class CephFloat(CephArgtype):
         try:
             val = float(s)
         except ValueError:
-            raise ArgumentError("{} doesn't represent a float".format(s))
+            raise ArgumentValidError("{} doesn't represent a float".format(s))
         if len(self.range) == 2:
             if val < self.range[0] or val > self.range[1]:
-                raise ArgumentError("{} not in range {}".format(val, self.range))
+                raise ArgumentValidError("{} not in range {}".format(val, self.range))
         elif len(self.range) == 1:
             if val < self.range[0]:
-                raise ArgumentError("{} not in range {}".format(val, self.range))
+                raise ArgumentValidError("{} not in range {}".format(val, self.range))
         return True
 
     def __str__(self):
@@ -142,7 +151,7 @@ class CephString(CephArgtype):
     def valid(self, s, partial=False):
         for c in self.badchars:
             if c in s:
-                raise ArgumentError("bad char {} in {}".format(c, s))
+                raise ArgumentFormatError("bad char {} in {}".format(c, s))
         return True
 
     def __str__(self):
@@ -158,7 +167,7 @@ class CephSocketpath(CephArgtype):
     def valid(self, s, partial=False):
         mode = os.stat(s).st_mode
         if not stat.S_ISSOCK(mode):
-            raise ArgumentError('socket path {} is not a FIFO'.format(s))
+            raise ArgumentValidError('socket path {} is not a socket'.format(s))
         return True
     def __str__(self):
         return '<admin-socket-path>'
@@ -180,25 +189,25 @@ class CephIPAddr(CephArgtype):
                 a = s[:port]
                 p = s[port+1:]
                 if int(p) > 65535:
-                    raise ArgumentError('{}: invalid IPv4 port'.format(p))
+                    raise ArgumentValidError('{}: invalid IPv4 port'.format(p))
             else:
                 a = s
                 p = None
             try:
                 socket.inet_pton(socket.AF_INET, a)
             except:
-                raise ArgumentError('{}: invalid IPv4 address'.format(a))
+                raise ArgumentValidError('{}: invalid IPv4 address'.format(a))
         else:
             # v6
             if s.startswith('['):
                 end = s.find(']')
                 if end == -1:
-                    raise ArgumentError('{} missing terminating ]'.format(s))
+                    raise ArgumentFormatError('{} missing terminating ]'.format(s))
                 if s[end+1] == ':':
                     try:
                         p = int(s[end+2])
                     except:
-                        raise ArgumentError('{}: bad port number'.format(s))
+                        raise ArgumentValidError('{}: bad port number'.format(s))
                 a = s[1:end]
             else:
                 a = s
@@ -206,9 +215,9 @@ class CephIPAddr(CephArgtype):
             try:
                 socket.inet_pton(socket.AF_INET6, a)
             except:
-                raise ArgumentError('{} not valid IPv6 address'.format(s))
+                raise ArgumentValidError('{} not valid IPv6 address'.format(s))
         if p is not None and long(p) > 65535:
-            raise ArgumentError("{} not a valid port number".format(p))
+            raise ArgumentValidError("{} not a valid port number".format(p))
         return True
 
     def __str__(self):
@@ -218,7 +227,7 @@ class CephEntityAddr(CephIPAddr):
     def valid(self,s):
         ip, nonce = s.split('/')
         if not super(CephIPAddr, self).valid(self, ip):
-            raise ArgumentError('CephEntityAddr {}: ip address invalid'.format(s))
+            raise ArgumentValidError('CephEntityAddr {}: ip address invalid'.format(s))
         return True
 
     def __str__(self):
@@ -230,7 +239,7 @@ Pool name; checked for presence in cluster
 class CephPoolname(CephArgtype):
     def valid(self, s):
         # if cluster.pool.exists(s):
-        #    raise ValueError("pool {} does not exist".format(s))
+        #    raise ArgumentValidError("pool {} does not exist".format(s))
         return True
 
     def __str__(self):
@@ -253,12 +262,12 @@ pgid, in form N.xxx (N = pool number, xxx = hex pgnum)
 class CephPgid(CephArgtype):
     def valid(self, s, partial=False):
         if s.find('.') == -1:
-            raise ArgumentError('pgid has no .')
+            raise ArgumentFormatError('pgid has no .')
         poolid, pgnum = s.split('.')
         try:
             pgnum = int(pgnum, 16)
         except:
-            raise ArgumentError('pgnum {} not hex integer'.format(pgnum))
+            raise ArgumentFormatError('pgnum {} not hex integer'.format(pgnum))
         return True
 
     def __str__(self):
@@ -270,15 +279,15 @@ Name, or type.id, where type is osd|mon|client|mds, and id is a base10 int
 class CephName(CephArgtype):
     def valid(self, s, partial=False):
         if s.find('.') == -1:
-            raise ArgumentError('no .')
+            raise ArgumentFormatError('no .')
         t, i = s.split('.')
         if not t in ('osd', 'mon', 'client', 'mds'):
-            raise ArgumentError('unknown type ' + self.t)
+            raise ArgumentValidError('unknown type ' + self.t)
         if t == 'osd':
             try:
                 i = int(i)
             except:
-                raise ArgumentError('osd id ' + i + ' not integer')
+                raise ArgumentFormatError('osd id ' + i + ' not integer')
             # could check for valid id?
         return True
 
@@ -296,14 +305,14 @@ class CephChoices(CephArgtype):
     def valid(self, s, partial=False):
         if not partial:
             if not s in self.strings:
-                raise ArgumentError("{} not in {}".format(s, self.strings))
+                raise ArgumentValidError("{} not in {}".format(s, self.strings))
             return True
 
         # partial
         for t in self.strings:
             if t.startswith(s):
                 return True
-        raise ArgumentError("{} not in {}".format(s, self.strings))
+        raise ArgumentValidError("{} not in {}".format(s, self.strings))
 
     def __str__(self):
         if len(self.strings) == 1:
@@ -319,7 +328,8 @@ class CephFilepath(CephArgtype):
         try:
             open(s, 'a+')
         except Exception as e:
-            raise ArgumentError('can\'t open {}: {}'.format(s, e))
+            raise ArgumentValidError('can\'t open {}: {}'.format(s, e))
+        return True
 
     def __str__(self):
         return '<outfilename>'
@@ -330,19 +340,19 @@ class CephFilepath(CephArgtype):
 class CephFragment(CephArgtype):
     def valid(self, s, partial=False):
         if s.find('/') == -1:
-            raise ArgumentError('{}: no /'.format(s))
+            raise ArgumentFormatError('{}: no /'.format(s))
         val, bits = s.split('/')
         # XXX is this right?
         if not val.startswith('0x'):
-            raise ArgumentError("{} not a hex integer".format(val))
+            raise ArgumentFormatError("{} not a hex integer".format(val))
         try:
             long(val)
         except:
-            raise ArgumentError('can\'t convert {} to integer'.format(val))
+            raise ArgumentFormatError('can\'t convert {} to integer'.format(val))
         try:
             long(bits)
         except:
-            raise ArgumentError('can\'t convert {} to integer'.format(bits))
+            raise ArgumentFormatError('can\'t convert {} to integer'.format(bits))
         return True
 
     def __str__(self):
@@ -357,7 +367,7 @@ class CephUUID(CephArgtype):
         try:
             uuid.UUID(s)
         except Exception as e:
-            raise ArgumentError('invalid UUID {}: {}'.format(s, e))
+            raise ArgumentFormatError('invalid UUID {}: {}'.format(s, e))
         return True
 
     def __str__(self):
@@ -549,7 +559,7 @@ def validate(s, signature):
                         req = 'at least'
                     else:
                         req = 'exactly'
-                    raise ArgumentError('saw {} of {}({}): expected {} {}'.format(desc.numseen, desc.name, desc, req, desc.n))
+                    raise ArgumentNumberError('saw {} of {}({}): expected {} {}'.format(desc.numseen, desc.name, desc, req, desc.n))
                 else:
                     break
             # may raise exception
