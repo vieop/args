@@ -1,2 +1,5 @@
-Have to straighten out which/how many of the first strings to strip and
-turn into an opcode
+Is it cool to absorb N fixed args into "opcode"?
+
+Should I spit back Actual JSON for the command to avoid quoting issues?
+
+{"opcode":N, "name":"value", "name2":"val2"}
