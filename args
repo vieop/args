@@ -399,7 +399,10 @@ class CephUUID(CephArgtype):
 # name is used for parse errors and for constructing JSON output
 # n is a numeric literal or 'n|N', meaning "at least one, but maybe more"
 # req=False means the argument need not be present in the list
-# anything else are arguments to pass to the type constructor
+# anything else are arguments to pass to the type constructor.
+# self.instance is an instance of type t constructed with typeargs.
+# valid() will later be called with input to validate against it,
+# and will store the validated value in self.instance.val for extraction.
 
 class argdesc(object):
     def __init__(self, t, name=None, n=1, req=True, **kwargs):
@@ -520,7 +523,9 @@ Return true if word matches desc (or partially, if partial == True).
 Raise exception if not.
 """
 def validate_one(word, desc, partial=False):
-    # may raise exception
+    # validate word against the constructed instance of the type
+    # in desc.  May raise exception.  If not, desc.instance.val will
+    # contain the validated value (in the appropriate type).
     desc.instance.valid(word, partial)
     desc.numseen += 1
     if desc.N:
