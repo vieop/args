@@ -395,14 +395,14 @@ class CephUUID(CephArgtype):
 # argdesc(typename, [type-specific kwargs], name='name', n=numallowed, req=False, **kwargs)
 # validation rules:
 # typename: type(**kwargs) will be constructed
-# later, type.validate(w) will be called with a word in that position
+# later, type.valid(w) will be called with a word in that position
 # name is used for parse errors and for constructing JSON output
 # n is a numeric literal or 'n|N', meaning "at least one, but maybe more"
 # req=False means the argument need not be present in the list
 # anything else are arguments to pass to the type constructor
 
 class argdesc(object):
-    def __init__(self, t, name='cmd', n=1, req=True, **kwargs):
+    def __init__(self, t, name=None, n=1, req=True, **kwargs):
         if isinstance(t, types.StringTypes):
             self.t = CephChoices
             self.typeargs = dict({'strings':t})
@@ -413,7 +413,7 @@ class argdesc(object):
             self.req = bool(req == True or req == 'True')
 
         self.name = name
-        self.N = (n == 'N' or n == 'n')
+        self.N = (n in ['n', 'N'])
         self.n = n
         if self.N:
             self.n = 1
@@ -432,7 +432,6 @@ class argdesc(object):
         return r[:-2] + ')'
 
     def __str__(self):
-        #s = '{}({})'.format(self.name, str(self.instance))
         if self.t == CephChoices and len(self.instance.strings) == 1:
             s = '{}'.format(str(self.instance))
         else:
@@ -514,6 +513,12 @@ def parse_json_funcsig(s):
         sigdict[int(op)] = newsig
     return sigdict
 
+"""
+validate_one(word, desc, partial=False)
+
+Return true if word matches desc (or partially, if partial == True).
+Raise exception if not.
+"""
 def validate_one(word, desc, partial=False):
     # may raise exception
     desc.instance.valid(word, partial)
@@ -701,14 +706,14 @@ def main():
         sys.exit(0)
 
     found = None
-    max = 0
+    best_match_cnt = 0
     bestsigs = []
     for op, sig in sigdict.iteritems():
         matched = matchnum(args, sig, partial=True)
-        if (matched > max):
+        if (matched > best_match_cnt):
             if verbose:
-                print "better match: {} > {}:{} ".format(matched, max, sig)
-            max = matched
+                print >> sys.stderr, "better match: {} > {}:{} ".format(matched, best_match_cnt, sig)
+            best_match_cnt = matched
             bestsigs = [{op:sig}]
         elif matched == max:
             bestsigs.append({op:sig})
@@ -726,7 +731,6 @@ def main():
                 pass
         if found:
             break
-
 
     if found is None:
         print '{}: invalid command'.format(args)
