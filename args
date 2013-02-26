@@ -43,9 +43,11 @@ class CephArgtype(object):
 
     def valid(self, s, partial=False):
         """
-        run validation against given string s (generally one word);
+        Run validation against given string s (generally one word);
         partial means to accept partial string matches (begins-with).
-        if cool, return True
+        If cool, set self.val to the value that should be returned
+        (a copy of the input string, or a numeric or boolean interpretation
+        thereof, for example), and return True
         if not, throw ArgumentError(msg-as-to-why)
         """
         pass
@@ -98,6 +100,7 @@ class CephInt(CephArgtype):
         elif len(self.range) == 1:
             if val < self.range[0]:
                 raise ArgumentValidError("{} not in range {}".format(val, self.range))
+        self.val = val
         return True
 
     def __str__(self):
@@ -132,6 +135,7 @@ class CephFloat(CephArgtype):
         elif len(self.range) == 1:
             if val < self.range[0]:
                 raise ArgumentValidError("{} not in range {}".format(val, self.range))
+        self.val = val
         return True
 
     def __str__(self):
@@ -152,6 +156,7 @@ class CephString(CephArgtype):
         for c in self.badchars:
             if c in s:
                 raise ArgumentFormatError("bad char {} in {}".format(c, s))
+        self.val = s
         return True
 
     def __str__(self):
@@ -168,6 +173,7 @@ class CephSocketpath(CephArgtype):
         mode = os.stat(s).st_mode
         if not stat.S_ISSOCK(mode):
             raise ArgumentValidError('socket path {} is not a socket'.format(s))
+        self.val = s
         return True
     def __str__(self):
         return '<admin-socket-path>'
@@ -218,6 +224,7 @@ class CephIPAddr(CephArgtype):
                 raise ArgumentValidError('{} not valid IPv6 address'.format(s))
         if p is not None and long(p) > 65535:
             raise ArgumentValidError("{} not a valid port number".format(p))
+        self.val = s
         return True
 
     def __str__(self):
@@ -228,6 +235,7 @@ class CephEntityAddr(CephIPAddr):
         ip, nonce = s.split('/')
         if not super(CephIPAddr, self).valid(self, ip):
             raise ArgumentValidError('CephEntityAddr {}: ip address invalid'.format(s))
+        self.val = s
         return True
 
     def __str__(self):
@@ -240,6 +248,7 @@ class CephPoolname(CephArgtype):
     def valid(self, s):
         # if cluster.pool.exists(s):
         #    raise ArgumentValidError("pool {} does not exist".format(s))
+        self.val = s
         return True
 
     def __str__(self):
@@ -251,6 +260,7 @@ present in pairs, and then could be checked for presence
 """
 class CephObjectname(CephArgtype):
     def valid(self, s, partial=False):
+        self.val = s
         return True
 
     def __str__(self):
@@ -268,6 +278,7 @@ class CephPgid(CephArgtype):
             pgnum = int(pgnum, 16)
         except:
             raise ArgumentFormatError('pgnum {} not hex integer'.format(pgnum))
+        self.val = s
         return True
 
     def __str__(self):
@@ -289,6 +300,7 @@ class CephName(CephArgtype):
             except:
                 raise ArgumentFormatError('osd id ' + i + ' not integer')
             # could check for valid id?
+        self.val = s
         return True
 
     def __str__(self):
@@ -306,11 +318,13 @@ class CephChoices(CephArgtype):
         if not partial:
             if not s in self.strings:
                 raise ArgumentValidError("{} not in {}".format(s, self.strings))
+            self.val = s
             return True
 
         # partial
         for t in self.strings:
             if t.startswith(s):
+                self.val = s
                 return True
         raise ArgumentValidError("{} not in {}".format(s, self.strings))
 
@@ -329,6 +343,7 @@ class CephFilepath(CephArgtype):
             open(s, 'a+')
         except Exception as e:
             raise ArgumentValidError('can\'t open {}: {}'.format(s, e))
+        self.val = s
         return True
 
     def __str__(self):
@@ -353,6 +368,7 @@ class CephFragment(CephArgtype):
             long(bits)
         except:
             raise ArgumentFormatError('can\'t convert {} to integer'.format(bits))
+        self.val = s
         return True
 
     def __str__(self):
@@ -368,6 +384,7 @@ class CephUUID(CephArgtype):
             uuid.UUID(s)
         except Exception as e:
             raise ArgumentFormatError('invalid UUID {}: {}'.format(s, e))
+        self.val = s
         return True
 
     def __str__(self):
@@ -565,9 +582,9 @@ def validate(s, signature):
             # may raise exception
             validate_one(word, desc)
             if desc.name in d:
-                d[desc.name] += ' ' + word
+                d[desc.name] += ' ' + desc.instance.val
             else:
-                d[desc.name] = word
+                d[desc.name] = desc.instance.val
         argpos += 1
     retval = ''
     for k,v in d.iteritems():
