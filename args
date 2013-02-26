@@ -9,7 +9,6 @@ import copy
 import types
 import subprocess
 import socket
-import json
 
 """
 Something wrong with number of arguments
@@ -302,7 +301,7 @@ class CephChoices(CephArgtype):
 
         # partial
         for t in self.strings:
-            if t.beginswith(s):
+            if t.startswith(s):
                 return True
         raise ArgumentError("{} not in {}".format(s, self.strings))
 
@@ -429,62 +428,64 @@ def concise_sig(sig):
     return s
 
 """
-parse_json_funcsig(s)
+parse_json_funcsigs(s)
 
 A function signature is an array of argdesc; it can be represented 
 in JSON as 
-{'arg1':
-  {
-   'type': type, 'name': paramname, 'n': paramnum, req: True|False
+  [ "type": type, "name": paramname, "n": paramnum, "req":true|false
    .
+   .
+   .
+  ]
 
-   .
-   .
-  }
-  .
-  .
+A set of sigs is in an dict mapped by a unique number:
+{
+ "1": ["type.. ]
+ "2": [.. ]
 }
 
-Parse the string s and return a function signature (or thrown an
-exception).
+Parse the string s and return an dict of function signatures
 """
 
 def parse_json_funcsig(s):
-    argnum = 0
     try:
-        sig = json.loads(s)
+        sigs = json.loads(s)
     except Exception as e:
-        print >> sys.stderr, "Couldn't parse JSON funcsig from {}: {}".format(s, e)
+        print >> sys.stderr, "Couldn't parse JSON {}: {}".format(s, e)
         raise e
-    newsig = []
-    for d in sig:
-        argnum += 1
-        if isinstance(d, types.StringTypes):
-            t = d
-            d = {'type':t, 'name':'arg{}'.format(argnum)}
-        else:
-            if not 'type' in d:
-                raise TypeError('JSON descriptor{} has no type'.format(sig))
-            # look up type string in our globals() dict; if it's an object
-            # of type types.TypeType, it must be a locally-defined class.
-            # otherwise, we haven't a clue.
-            if d['type'] in globals():
-                t = globals()[d['type']]
-                if type(t) != types.TypeType: 
-                    raise TypeError('unknown type {}'.format(d['type']))
+    sigdict = {}
+    for op, sig in sigs.iteritems():
+        newsig = []
+        argnum = 0
+        for d in sig:
+            argnum += 1
+            if isinstance(d, types.StringTypes):
+                t = d
+                name = '__opcode{}'.format(argnum)
+                d = {'type':t, 'name':name}
             else:
-                raise TypeError('no type found in {}'.format(d))
-        kwargs = dict()
-        for key, val in d.items():
-            if key not in ['type', 'name', 'n', 'req']:
-                kwargs[key] = val
-        newsig.append(argdesc(t,
-                              name=d.get('name', None),
-                              n=d.get('n', 1),
-                              req=d.get('req', True),
-                              **kwargs))
-    return newsig
-
+                if not 'type' in d:
+                    raise TypeError('JSON descriptor{} has no type'.format(sig))
+                # look up type string in our globals() dict; if it's an object
+                # of type types.TypeType, it must be a locally-defined class.
+                # otherwise, we haven't a clue.
+                if d['type'] in globals():
+                    t = globals()[d['type']]
+                    if type(t) != types.TypeType:
+                        raise TypeError('unknown type {}'.format(d['type']))
+                else:
+                    raise TypeError('no type found in {}'.format(d))
+            kwargs = dict()
+            for key, val in d.items():
+                if key not in ['type', 'name', 'n', 'req']:
+                    kwargs[key] = val
+            newsig.append(argdesc(t,
+                                  name=d.get('name', None),
+                                  n=d.get('n', 1),
+                                  req=d.get('req', True),
+                                  **kwargs))
+        sigdict[int(op)] = newsig
+    return sigdict
 
 def validate_one(word, desc, partial=False):
     # may raise exception
@@ -527,7 +528,8 @@ def matchnum(s, signature, partial=False):
 validate(s, signature)
 
 Assumes s represents a possible command input following format of
-signature.  Runs a validation; no exception means it's OK
+signature.  Runs a validation; no exception means it's OK.  Return
+a string of the form 'argname:value [argname:value ...]'
 """
 
 def validate(s, signature):
@@ -557,7 +559,12 @@ def validate(s, signature):
             else:
                 d[desc.name] = word
         argpos += 1
-    return json.dumps(d)
+    retval = ''
+    for k,v in d.iteritems():
+        if k.startswith('__opcode'):
+            continue
+        retval += '{}:{} '.format(k,v)
+    return retval.rstrip()
 
 # convenience function
 
@@ -639,29 +646,26 @@ def selftest():
 # this is what will be opened, with these args, to snarf a set of
 # of command descriptors, one per line, each one parseable by 
 # parse_json_funcsig into a signature.
-COMMAND = './cmd'
 
 def main():
     #global cluster
     #cluster = rados.Rados(conffile='')
     verbose = True
+    command = os.environ.get('COMMAND', './cmd')
 
     # fetch JSON sigs from command
-    p = subprocess.Popen('./cmd', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = subprocess.Popen(command.split(), stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
     outdata, errdata = p.communicate()
     if (len(errdata)):
         print "error: ", errdata
         sys.exit(1)
 
-    sigs = list()
-    for a in outdata.split('\n'):
-        if len(a.strip()) == 0:
-            continue
-        sig = parse_json_funcsig(a)
-        sigs.append(sig)
+    sigdict = parse_json_funcsig(outdata.strip())
 
-        if verbose:
-            print concise_sig(sig)
+    if verbose:
+        for op, sig in sigdict.iteritems():
+            print op, ":", concise_sig(sig)
 
     # validate input args against list of sigs
 
@@ -672,25 +676,30 @@ def main():
     found = None
     max = 0
     bestsigs = []
-    for sig in sigs:
+    for op, sig in sigdict.iteritems():
         matched = matchnum(args, sig, partial=True)
         if (matched > max):
             if verbose:
                 print "better match: {} > {}:{} ".format(matched, max, sig)
             max = matched
-            bestsigs = [sig]
+            bestsigs = [{op:sig}]
         elif matched == max:
-            bestsigs.append(sig) 
+            bestsigs.append({op:sig})
 
-    for sig in bestsigs:
-        try:
-            print validate(args, sig)
-            found = sig
+    for opsig in bestsigs:
+        for (op, sig) in opsig.iteritems():
+            try:
+                ret = validate(args, sig)
+                print '"opcode:{} {}"'.format(op, ret)
+                found = sig
+                break
+            except ArgumentError as e:
+                if verbose:
+                    print >> sys.stderr, "almost {}:\n** {}".format(concise_sig(sig), e)
+                pass
+        if found:
             break
-        except Exception as e:
-            if verbose:
-                print >> sys.stderr, "almost {}:\n** {}".format(concise_sig(sig), e)
-            pass
+
 
     if found is None:
         print '{}: invalid command'.format(args)

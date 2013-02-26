@@ -21,14 +21,18 @@ using namespace std;
 string
 quote(string s)
 {
+  // first, if 'true', 'false', or 'null', no quoting needed
+  if (s == "true" || s == "false" || s == "null")
+    return s;
+
   // if it doesn't convert, quote it; otherwise return it
   unsigned long long ull;
   try {
     ull = lexical_cast<unsigned long long>(s);
+    return s;
   } catch(bad_lexical_cast&){
     return "\"" + s + "\"";
   }
-  return s;
 }
 
 string comma_unless(bool &first)
@@ -78,7 +82,7 @@ transform_sig_to_json(string &sig, string *ret)
 	val = t.substr(pos+1);
       } else {
         key = t;
-        val = "True";
+        val = "true";
       }
       argjson << quote(key) << ":" << quote(val);
     }
@@ -123,14 +127,14 @@ main(int argc, char **argv)
     "osd scrub type=CephInt,name=osdnum",
     "osd deep-scrub type=CephInt,name=osdnum",
     "osd repair type=CephInt,name=osdnum",
-    "osd lspools type=CephInt,name=auid,req=False",
+    "osd lspools type=CephInt,name=auid,req=false",
     "osd blacklist ls",
-    "osd blacklist add type=CephEntityAddr,name=addr type=CephFloat,range=0.0|1.0e7,req=False,name=until",
+    "osd blacklist add type=CephEntityAddr,name=addr type=CephFloat,range=0.0|1.0e7,req=false,name=until",
     "osd blacklist rm type=CephEntityAddr,name=addr",
     "osd crush rule type=CephChoices,strings=list|ls,name=listorls",
     "osd crush rule dump",
     "osd crush dump",
-    "osd crush set type=CephInt,name=id type=CephName,name=osdname,req=False type=CephFloat,name=weight type=CephString,n=N,name=loc",
+    "osd crush set type=CephInt,name=id type=CephName,name=osdname,req=false type=CephFloat,name=weight type=CephString,n=N,name=loc",
     "osd crush create-or-move type=CephInt,name=id type=CephFloat,name=weight type=CephString,n=N,name=loc",
     "osd crush move type=CephString,name=name type=CephString,n=N,name=loc",
     "osd crush type=CephChoices,strings=rm|remove,name=op type=CephInt,name=id",
@@ -151,7 +155,7 @@ main(int argc, char **argv)
     "osd create type=CephUUID,name=uuid",
     "osd rm type=CephInt,name=id,n=N",
     "osd pool type=CephChoices,strings=mksnap|rmsnap,name=op type=CephPoolname,name=pool type=CephString,name=snap",
-    "osd pool create type=CephPoolname,name=pool type=CephInt,name=pg_num type=CephInt,name=pgp_num,req=False",
+    "osd pool create type=CephPoolname,name=pool type=CephInt,name=pg_num type=CephInt,name=pgp_num,req=false",
     "osd pool delete type=CephPoolname,name=pool type=CephPoolname,name=pool2 --yes-i-really-really-mean-it",
     "osd pool rename type=CephPoolname,name=from type=CephPoolname,name=to",
     "osd pool type=CephChoices,strings=set|get,name=op type=CephPoolname,name=pool type=CephChoices,strings=size|min_size|crash_replay_interval|pg_num|pgp_num|crush_ruleset,name=var, type=CephInt,name=n",
