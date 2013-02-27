@@ -553,9 +553,8 @@ def matchnum(s, signature, partial=False):
             try:
                 word = words.pop(0)
             except:
-                # out of input, all of rest better be not required
-                if desc.req and not desc.N and desc.numseen < desc.n:
-                    return matched
+                # regardless, return how many we matched
+                return matched
             # may raise exception
             try:
                 validate_one(word, desc, partial)
@@ -731,7 +730,7 @@ def main():
                 print >> sys.stderr, "better match: {} > {}:{} ".format(matched, best_match_cnt, sig)
             best_match_cnt = matched
             bestsigs = [{op:sig}]
-        elif matched == max:
+        elif matched == best_match_cnt:
             bestsigs.append({op:sig})
 
     for opsig in bestsigs:
