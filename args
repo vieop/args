@@ -10,6 +10,7 @@ import types
 import subprocess
 import socket
 import uuid
+import argparse
 
 """
 Something wrong with arguments
@@ -107,7 +108,7 @@ class CephInt(CephArgtype):
         r = ''
         if len(self.range):
             r = '(range {} len {})'.format(self.range, len(self.range))
-        return '<integer{}>'.format(r)
+        return '<int{}>'.format(r)
 
 
 """
@@ -282,7 +283,7 @@ class CephPgid(CephArgtype):
         return True
 
     def __str__(self):
-        return '<pgid (p.xxx)>'
+        return '<pgid>'
 
 """
 Name, or type.id, where type is osd|mon|client|mds, and id is a base10 int
@@ -332,7 +333,7 @@ class CephChoices(CephArgtype):
         if len(self.strings) == 1:
             return '{}'.format(self.strings[0])
         else:
-            return '<one of \'{}\'>'.format('|'.join(self.strings))
+            return '{{{}}}'.format('|'.join(self.strings))
 
 """
 Openable file
@@ -449,6 +450,15 @@ class argdesc(object):
             s = '{' + s + '}'
         return s
 
+    # like above, but omit parameter names
+    def helpstr(self):
+        s = '{}'.format(str(self.instance))
+        if self.N:
+            s += '[' + str(self.instance) + '...]'
+        if not self.req:
+            s = '{' + s + '}'
+        return s
+
 def concise_sig(sig):
     first = True
     s = ''
@@ -457,7 +467,7 @@ def concise_sig(sig):
             first = False
         else:
             s += ' '
-        s += str(d)
+        s += d.helpstr()
     return s
 
 """
@@ -642,22 +652,14 @@ def get_process_output(args):
         sys.exit(1)
     return outdata
 
-def main(args):
+def main():
     #global cluster
     #cluster = rados.Rados(conffile='')
-    verbose = False
-    if len(args) and args[0] == '-v':
-        args.pop(0)
-        verbose = True
-
-    if len(args) == 0:
-        print >> sys.stderr, 'No command given'
-        sys.exit(0)
 
     command = os.environ.get('COMMAND')
     if not command:
         print >> sys.stderr, 'Must define $COMMAND'
-        sys.exit(1)
+        return 1
 
     # fetch JSON sigs from command
     # each line corresponds to the opcode that will be sent back
@@ -668,10 +670,24 @@ def main(args):
     outdata = get_process_output([command, 'get_command_descriptions'])
     sigdict = parse_json_funcsig(outdata.strip())
 
-    if verbose:
+    usage = ''
+    for op, sigandhelp in sigdict.iteritems():
+        usage += '{}: {}\n'.format(concise_sig(sigandhelp['sig']),
+                                       sigandhelp['helptext'])
+    parser = argparse.ArgumentParser(description='Frontend for ceph CLI',
+                                     usage=usage)
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('args', nargs='*')
+    parsed_args = parser.parse_args()
+
+    if parsed_args.verbose:
         for op, sigandhelp in sigdict.iteritems():
             sig = sigandhelp['sig']
             print op, ":", concise_sig(sig)
+
+    if len(parsed_args.args) == 0:
+        print >> sys.stderr, 'No command given'
+        return 1
 
     # validate input args against list of sigs
 
@@ -683,9 +699,9 @@ def main(args):
     for op, sigandhelp in sigdict.iteritems():
         sig = sigandhelp['sig']
         helptext = sigandhelp['helptext']
-        matched = matchnum(args, sig, partial=True)
+        matched = matchnum(parsed_args.args, sig, partial=True)
         if (matched > best_match_cnt):
-            if verbose:
+            if parsed_args.verbose:
                 print >> sys.stderr, "better match: {} > {}:{} ".format(matched, best_match_cnt, sig)
             best_match_cnt = matched
             bestsigs = [{op:sigandhelp}]
@@ -697,27 +713,31 @@ def main(args):
         for (op, sigandhelp) in opsig.iteritems():
             sig = sigandhelp['sig']
             try:
-                valid_dict = validate(args, sig)
+                valid_dict = validate(parsed_args.args, sig)
                 valid_dict['opcode'] = op
                 found = sig
                 break
             except ArgumentError as e:
-                if verbose:
+                if parsed_args.verbose:
                     print >> sys.stderr, "almost {}:\n** {}".format(concise_sig(sig), e)
                 pass
     if not found:
-        print >> sys.stderr, '{}: invalid command'.format(args)
-        sys.exit(1)
+        print >> sys.stderr, '{}: invalid command'.format(parsed_args.args)
+        return 1
 
     cmd = [command, json.dumps(valid_dict)]
     print >> sys.stderr, "invoking ", cmd
     print get_process_output([command, json.dumps(valid_dict)])
 
+###
+# main
+###
+
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    sys.exit(main())
 
 
-
+# obsolete interfaces; should recode
 
 def selftest():
     sig = [argdesc('osd'), argdesc('stat')]
